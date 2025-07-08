@@ -15,6 +15,7 @@ import torchvision
 from PIL import Image
 from rasterio.windows import Window
 from skimage import measure
+from typing import Optional, Callable
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset
 from torchvision.models.detection import maskrcnn_resnet50_fpn
@@ -2005,7 +2006,7 @@ def train_segmentation_model(
     seed=42,
     val_split=0.2,
     test_split=0.1,
-    split_function=None,
+    split_function: Optional[Callable] = None,
     print_freq=10,
     verbose=True,
     save_best_only=True,
@@ -2041,6 +2042,8 @@ def train_segmentation_model(
         weight_decay (float): Weight decay for optimizer. Defaults to 1e-4.
         seed (int): Random seed for reproducibility. Defaults to 42.
         val_split (float): Fraction of data to use for validation (0-1). Defaults to 0.2.
+        test_split (float): Fraction of data to use for testing (0-1). Defaults to 0.1.
+        split_function (callable, optional): Custom function to split data into train/val/test sets.
         print_freq (int): Frequency of printing training progress. Defaults to 10.
         verbose (bool): If True, prints detailed training progress. Defaults to True.
         save_best_only (bool): If True, only saves the best model. Otherwise saves all checkpoints.
@@ -2132,12 +2135,13 @@ def train_segmentation_model(
         raise FileNotFoundError("No matching image and label files found")
 
     # Split data into train and validation sets
-    if split_function:
+    if split_function is not None:
         print("Using custom split function for train/val split...")
         train_imgs, val_imgs, train_labels, val_labels = split_function(
             image_files, label_files, seed=seed, val_split=val_split, test_split=test_split
         )
     else:
+        print("Using default train/val split...")
         train_imgs, val_imgs, train_labels, val_labels = train_test_split(
             image_files, label_files, test_size=val_split, random_state=seed
         )
