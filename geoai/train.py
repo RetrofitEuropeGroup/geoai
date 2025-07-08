@@ -1,6 +1,7 @@
 import glob
 import math
 import os
+import platform
 import random
 import time
 
@@ -8,10 +9,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import rasterio
 import torch
+import torch.nn.functional as F
 import torch.utils.data
 import torchvision
-
-# import torchvision.transforms as transforms
+from PIL import Image
 from rasterio.windows import Window
 from skimage import measure
 from sklearn.model_selection import train_test_split
@@ -21,8 +22,7 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 from tqdm import tqdm
 
-from .utils import download_model_from_hf
-
+from .utils import download_model_from_hf, get_device
 
 # Additional imports for semantic segmentation
 try:
@@ -697,6 +697,7 @@ def train_MaskRCNN_model(
     visualize=False,
     resume_training=False,
     print_freq=10,
+    device=None,
     verbose=True,
 ):
     """Train and evaluate Mask R-CNN model for instance segmentation.
@@ -726,6 +727,7 @@ def train_MaskRCNN_model(
         resume_training (bool): If True and pretrained_model_path is provided,
             will try to load optimizer and scheduler states as well. Defaults to False.
         print_freq (int): Frequency of printing training progress. Defaults to 10.
+        device (torch.device): Device to train on. If None, uses CUDA if available.
         verbose (bool): If True, prints detailed training progress. Defaults to True.
     Returns:
         None: Model weights are saved to output_dir.
@@ -748,22 +750,27 @@ def train_MaskRCNN_model(
     os.makedirs(output_dir, exist_ok=True)
 
     # Get device
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    if device is None:
+        device = get_device()
     print(f"Using device: {device}")
 
     # Get all image and label files
+    # Support multiple image formats: GeoTIFF, PNG, JPG, JPEG, TIF, TIFF
+    image_extensions = (".tif", ".tiff", ".png", ".jpg", ".jpeg")
+    label_extensions = (".tif", ".tiff", ".png", ".jpg", ".jpeg")
+
     image_files = sorted(
         [
             os.path.join(images_dir, f)
             for f in os.listdir(images_dir)
-            if f.endswith(".tif")
+            if f.lower().endswith(image_extensions)
         ]
     )
     label_files = sorted(
         [
             os.path.join(labels_dir, f)
             for f in os.listdir(labels_dir)
-            if f.endswith(".tif")
+            if f.lower().endswith(label_extensions)
         ]
     )
 
@@ -802,12 +809,16 @@ def train_MaskRCNN_model(
     )
 
     # Create data loaders
+    # Use num_workers=0 on macOS and Windows to avoid multiprocessing issues
+    # Windows often has issues with multiprocessing in Jupyter notebooks
+    num_workers = 0 if platform.system() in ["Darwin", "Windows"] else 4
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
         collate_fn=collate_fn,
-        num_workers=4,
+        num_workers=num_workers,
     )
 
     val_loader = DataLoader(
@@ -815,7 +826,7 @@ def train_MaskRCNN_model(
         batch_size=batch_size,
         shuffle=False,
         collate_fn=collate_fn,
-        num_workers=4,
+        num_workers=num_workers,
     )
 
     # Initialize model (2 classes: background and building)
@@ -996,9 +1007,7 @@ def inference_on_geotiff(
         tuple: Tuple containing output path and inference time in seconds.
     """
     if device is None:
-        device = (
-            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        )
+        device = get_device()
 
     # Put model in evaluation mode
     model.to(device)
@@ -1227,9 +1236,7 @@ def object_detection(
     """
     # Load your trained model
     if device is None:
-        device = (
-            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        )
+        device = get_device()
     if model is None:
         model = get_instance_segmentation_model(
             num_classes=2, num_channels=num_channels, pretrained=pretrained
@@ -1300,9 +1307,8 @@ def object_detection_batch(
     """
     # Load your trained model
     if device is None:
-        device = (
-            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        )
+        device = get_device()
+
     if model is None:
         model = get_instance_segmentation_model(
             num_classes=2, num_channels=num_channels, pretrained=pretrained
@@ -1353,65 +1359,216 @@ def object_detection_batch(
 
 
 class SemanticSegmentationDataset(Dataset):
-    """Dataset for semantic segmentation from GeoTIFF images and labels."""
+    """Dataset for semantic segmentation from GeoTIFF, PNG, JPG, and other image formats."""
 
-    def __init__(self, image_paths, label_paths, transforms=None, num_channels=None):
+    def __init__(
+        self,
+        image_paths,
+        label_paths,
+        transforms=None,
+        num_channels=None,
+        target_size=None,
+        resize_mode="resize",
+        num_classes=2,
+    ):
         """
         Initialize dataset for semantic segmentation.
 
         Args:
-            image_paths (list): List of paths to image GeoTIFF files.
-            label_paths (list): List of paths to label GeoTIFF files.
+            image_paths (list): List of paths to image files (GeoTIFF, PNG, JPG, etc.).
+            label_paths (list): List of paths to label files (GeoTIFF, PNG, JPG, etc.).
             transforms (callable, optional): Transformations to apply to images and masks.
             num_channels (int, optional): Number of channels to use from images. If None,
                 auto-detected from the first image.
+            target_size (tuple, optional): Target size (height, width) for standardizing images.
+                If None, images will keep their original sizes.
+            resize_mode (str): How to handle size standardization. Options:
+                'resize' - Resize images to target_size (may change aspect ratio)
+                'pad' - Pad images to target_size (preserves aspect ratio)
+            num_classes (int): Number of classes for segmentation. Used for mask normalization.
         """
         self.image_paths = image_paths
         self.label_paths = label_paths
         self.transforms = transforms
+        self.target_size = target_size
+        self.resize_mode = resize_mode
+        self.num_classes = num_classes
 
         # Auto-detect the number of channels if not specified
         if num_channels is None:
-            with rasterio.open(self.image_paths[0]) as src:
-                self.num_channels = src.count
+            self.num_channels = self._get_num_channels(self.image_paths[0])
         else:
             self.num_channels = num_channels
+
+    def _is_geotiff(self, file_path):
+        """Check if file is a GeoTIFF based on extension."""
+        return file_path.lower().endswith((".tif", ".tiff"))
+
+    def _get_num_channels(self, image_path):
+        """Get number of channels from an image file."""
+        if self._is_geotiff(image_path):
+            with rasterio.open(image_path) as src:
+                return src.count
+        else:
+            # For standard image formats, use PIL
+            with Image.open(image_path) as img:
+                if img.mode == "RGB":
+                    return 3
+                elif img.mode == "RGBA":
+                    return 4
+                elif img.mode == "L":
+                    return 1
+                else:
+                    # Convert to RGB and return 3 channels
+                    return 3
+
+    def _resize_image_and_mask(self, image, mask):
+        """Resize image and mask to target size."""
+        if self.target_size is None:
+            return image, mask
+
+        target_h, target_w = self.target_size
+
+        if self.resize_mode == "resize":
+            # Direct resize (may change aspect ratio)
+            image = F.interpolate(
+                image.unsqueeze(0),
+                size=(target_h, target_w),
+                mode="bilinear",
+                align_corners=False,
+            ).squeeze(0)
+
+            mask = (
+                F.interpolate(
+                    mask.unsqueeze(0).unsqueeze(0).float(),
+                    size=(target_h, target_w),
+                    mode="nearest",
+                )
+                .squeeze(0)
+                .squeeze(0)
+                .long()
+            )
+            # Clamp mask values to ensure they're within valid range [0, num_classes-1]
+            mask = torch.clamp(mask, 0, self.num_classes - 1)
+
+        elif self.resize_mode == "pad":
+            # Pad to target size (preserves aspect ratio)
+            image = self._pad_to_size(image, (target_h, target_w))
+            mask = self._pad_to_size(mask.unsqueeze(0), (target_h, target_w)).squeeze(0)
+            # Clamp mask values to ensure they're within valid range [0, num_classes-1]
+            mask = torch.clamp(mask, 0, self.num_classes - 1)
+
+        return image, mask
+
+    def _pad_to_size(self, tensor, target_size):
+        """Pad tensor to target size with zeros."""
+        target_h, target_w = target_size
+
+        if tensor.dim() == 3:  # Image [C, H, W]
+            _, h, w = tensor.shape
+        elif tensor.dim() == 2:  # Mask [H, W]
+            h, w = tensor.shape
+        else:
+            raise ValueError(f"Unexpected tensor dimensions: {tensor.shape}")
+
+        # Calculate padding
+        pad_h = max(0, target_h - h)
+        pad_w = max(0, target_w - w)
+
+        # Pad equally on both sides
+        pad_top = pad_h // 2
+        pad_bottom = pad_h - pad_top
+        pad_left = pad_w // 2
+        pad_right = pad_w - pad_left
+
+        # Apply padding (left, right, top, bottom)
+        padded = F.pad(tensor, (pad_left, pad_right, pad_top, pad_bottom), value=0)
+
+        # Crop if tensor is larger than target
+        if tensor.dim() == 3:
+            padded = padded[:, :target_h, :target_w]
+        else:
+            padded = padded[:target_h, :target_w]
+
+        return padded
 
     def __len__(self):
         return len(self.image_paths)
 
     def __getitem__(self, idx):
         # Load image
-        with rasterio.open(self.image_paths[idx]) as src:
-            # Read as [C, H, W] format
-            image = src.read().astype(np.float32)
+        image_path = self.image_paths[idx]
+        if self._is_geotiff(image_path):
+            # Load GeoTIFF using rasterio
+            with rasterio.open(image_path) as src:
+                # Read as [C, H, W] format
+                image = src.read().astype(np.float32)
+                # Normalize image to [0, 1] range
+                image = image / 255.0
+        else:
+            # Load standard image formats using PIL
+            with Image.open(image_path) as img:
+                # Convert to RGB if needed
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+                # Convert to numpy array [H, W, C]
+                image = np.array(img, dtype=np.float32)
+                # Normalize to [0, 1] range
+                image = image / 255.0
+                # Convert to [C, H, W] format
+                image = np.transpose(image, (2, 0, 1))
 
-            # Normalize image to [0, 1] range
-            image = image / 255.0
+        # Handle different number of channels
+        if image.shape[0] > self.num_channels:
+            image = image[: self.num_channels]  # Keep only specified bands
+        elif image.shape[0] < self.num_channels:
+            # Pad with zeros if less than specified bands
+            padded = np.zeros(
+                (self.num_channels, image.shape[1], image.shape[2]),
+                dtype=np.float32,
+            )
+            padded[: image.shape[0]] = image
+            image = padded
 
-            # Handle different number of channels
-            if image.shape[0] > self.num_channels:
-                image = image[: self.num_channels]  # Keep only specified bands
-            elif image.shape[0] < self.num_channels:
-                # Pad with zeros if less than specified bands
-                padded = np.zeros(
-                    (self.num_channels, image.shape[1], image.shape[2]),
-                    dtype=np.float32,
-                )
-                padded[: image.shape[0]] = image
-                image = padded
-
-            # Convert to CHW tensor
-            image = torch.as_tensor(image, dtype=torch.float32)
+        # Convert to CHW tensor
+        image = torch.as_tensor(image, dtype=torch.float32)
 
         # Load label mask
-        with rasterio.open(self.label_paths[idx]) as src:
-            label_mask = src.read(1).astype(np.int64)
-            # Keep original class values for multi-class segmentation
-            # No conversion to binary - preserve all class labels
+        label_path = self.label_paths[idx]
+        if self._is_geotiff(label_path):
+            # Load GeoTIFF label using rasterio
+            with rasterio.open(label_path) as src:
+                label_mask = src.read(1).astype(np.int64)
+        else:
+            # Load standard image format label using PIL
+            with Image.open(label_path) as img:
+                # Convert to grayscale if needed
+                if img.mode != "L":
+                    img = img.convert("L")
+                label_mask = np.array(img, dtype=np.int64)
+
+        # Normalize mask values to expected class range [0, num_classes-1]
+        # This handles cases where masks contain pixel values outside the expected range
+        unique_vals = np.unique(label_mask)
+        if len(unique_vals) > 2:
+            # For multi-class case, we need to map values to proper class indices
+            # For now, we'll use a simple thresholding approach for binary segmentation
+            if self.num_classes == 2:
+                # Binary segmentation: convert to 0 (background) and 1 (foreground)
+                label_mask = (label_mask > 0).astype(np.int64)
+            else:
+                # For multi-class, we could implement more sophisticated mapping
+                # For now, just ensure values are in valid range
+                label_mask = np.clip(label_mask, 0, self.num_classes - 1)
+        elif len(unique_vals) == 2 and unique_vals.max() > 1:
+            # Binary mask with values not in [0,1] range - normalize to [0,1]
+            label_mask = (label_mask > 0).astype(np.int64)
 
         # Convert to tensor
         mask = torch.as_tensor(label_mask, dtype=torch.long)
+
+        # Resize image and mask to target size if specified
+        image, mask = self._resize_image_and_mask(image, mask)
 
         # Apply transforms if specified
         if self.transforms is not None:
@@ -1851,6 +2008,11 @@ def train_segmentation_model(
     verbose=True,
     save_best_only=True,
     plot_curves=False,
+    device=None,
+    checkpoint_path=None,
+    resume_training=False,
+    target_size=None,
+    resize_mode="resize",
     **kwargs,
 ):
     """
@@ -1882,6 +2044,18 @@ def train_segmentation_model(
         save_best_only (bool): If True, only saves the best model. Otherwise saves all checkpoints.
             Defaults to True.
         plot_curves (bool): If True, plots training curves. Defaults to False.
+        device (torch.device): Device to train on. If None, uses CUDA if available.
+        checkpoint_path (str, optional): Path to a checkpoint file to load for resuming training.
+            If provided, will load model weights and optionally optimizer/scheduler state.
+        resume_training (bool): If True and checkpoint_path is provided, will resume training
+            from the checkpoint including optimizer and scheduler state. Defaults to False.
+        target_size (tuple, optional): Target size (height, width) for standardizing images.
+            If None, the function will automatically detect if images have varying sizes and set
+            a default target_size of (512, 512) to prevent batching errors. To disable automatic
+            resizing, set this parameter explicitly. Example: (512, 512). Defaults to None.
+        resize_mode (str): How to handle size standardization when target_size is specified.
+            'resize' - Resize images to target_size (may change aspect ratio)
+            'pad' - Pad images to target_size (preserves aspect ratio). Defaults to 'resize'.
         **kwargs: Additional arguments passed to smp.create_model().
     Returns:
         None: Model weights are saved to output_dir.
@@ -1909,22 +2083,27 @@ def train_segmentation_model(
     os.makedirs(output_dir, exist_ok=True)
 
     # Get device
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    if device is None:
+        device = get_device()
     print(f"Using device: {device}")
 
     # Get all image and label files
+    # Support multiple image formats: GeoTIFF, PNG, JPG, JPEG, TIF, TIFF
+    image_extensions = (".tif", ".tiff", ".png", ".jpg", ".jpeg")
+    label_extensions = (".tif", ".tiff", ".png", ".jpg", ".jpeg")
+
     image_files = sorted(
         [
             os.path.join(images_dir, f)
             for f in os.listdir(images_dir)
-            if f.endswith(".tif")
+            if f.lower().endswith(image_extensions)
         ]
     )
     label_files = sorted(
         [
             os.path.join(labels_dir, f)
             for f in os.listdir(labels_dir)
-            if f.endswith(".tif")
+            if f.lower().endswith(label_extensions)
         ]
     )
 
@@ -1957,36 +2136,117 @@ def train_segmentation_model(
 
     print(f"Training on {len(train_imgs)} images, validating on {len(val_imgs)} images")
 
+    # Auto-detect image sizes and set target_size if needed
+    if target_size is None:
+        print("Checking image sizes for compatibility...")
+
+        # Sample a few images to check size consistency
+        sample_images = train_imgs[: min(5, len(train_imgs))]
+        image_sizes = []
+
+        for img_path in sample_images:
+            try:
+                if img_path.lower().endswith((".tif", ".tiff")):
+                    with rasterio.open(img_path) as src:
+                        height, width = src.height, src.width
+                else:
+                    with Image.open(img_path) as img:
+                        width, height = img.size
+                image_sizes.append((height, width))
+            except Exception as e:
+                print(f"Warning: Could not read image {img_path}: {e}")
+                continue
+
+        # Check if all images have the same size
+        if len(image_sizes) == 0:
+            print(
+                "Warning: Could not read any sample images. Setting target_size to (512, 512) as a safe default."
+            )
+            target_size = (512, 512)
+        else:
+            unique_sizes = set(image_sizes)
+            if len(unique_sizes) > 1:
+                print(
+                    f"Warning: Found images with different sizes: {list(unique_sizes)}"
+                )
+                print(
+                    "Setting target_size to (512, 512) to standardize image dimensions."
+                )
+                print("This will resize all images to 512x512 pixels.")
+                print("To use a different size, set target_size parameter explicitly.")
+                target_size = (512, 512)
+            else:
+                print(f"All sampled images have the same size: {image_sizes[0]}")
+                print("No resizing needed.")
+
     # Create datasets
     train_dataset = SemanticSegmentationDataset(
         train_imgs,
         train_labels,
         transforms=get_semantic_transform(train=True),
         num_channels=num_channels,
+        target_size=target_size,
+        resize_mode=resize_mode,
+        num_classes=num_classes,
     )
     val_dataset = SemanticSegmentationDataset(
         val_imgs,
         val_labels,
         transforms=get_semantic_transform(train=False),
         num_channels=num_channels,
+        target_size=target_size,
+        resize_mode=resize_mode,
+        num_classes=num_classes,
     )
 
     # Create data loaders
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True,
-    )
+    # Use num_workers=0 on macOS and Windows to avoid multiprocessing issues
+    # Windows often has issues with multiprocessing in Jupyter notebooks
+    num_workers = 0 if platform.system() in ["Darwin", "Windows"] else 4
 
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=4,
-        pin_memory=True,
-    )
+    try:
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+            pin_memory=True,
+        )
+
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=True,
+        )
+
+        # Test the data loader by loading one batch to catch size mismatch errors early
+        print("Testing data loader...")
+        try:
+            next(iter(train_loader))
+            print("Data loader test passed.")
+        except RuntimeError as e:
+            if "stack expects each tensor to be equal size" in str(e):
+                raise RuntimeError(
+                    "Images have different sizes and cannot be batched together. "
+                    "Please set target_size parameter to standardize image dimensions. "
+                    "Example: target_size=(512, 512). "
+                    f"Original error: {str(e)}"
+                ) from e
+            else:
+                raise
+
+    except Exception as e:
+        if "stack expects each tensor to be equal size" in str(e):
+            raise RuntimeError(
+                "Images have different sizes and cannot be batched together. "
+                "Please set target_size parameter to standardize image dimensions. "
+                "Example: target_size=(512, 512). "
+                f"Original error: {str(e)}"
+            ) from e
+        else:
+            raise
 
     # Initialize model
     model = get_smp_model(
@@ -2019,12 +2279,63 @@ def train_segmentation_model(
     val_losses = []
     val_ious = []
     val_dices = []
+    start_epoch = 0
+
+    # Load checkpoint if provided
+    if checkpoint_path is not None:
+        if not os.path.exists(checkpoint_path):
+            raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
+
+        print(f"Loading checkpoint from: {checkpoint_path}")
+        try:
+            checkpoint = torch.load(checkpoint_path, map_location=device)
+
+            if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+                # Load model state
+                model.load_state_dict(checkpoint["model_state_dict"])
+
+                if resume_training:
+                    # Resume training from checkpoint
+                    start_epoch = checkpoint.get("epoch", 0) + 1
+                    best_iou = checkpoint.get("best_iou", 0)
+
+                    # Load optimizer state if available
+                    if "optimizer_state_dict" in checkpoint:
+                        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+                    # Load scheduler state if available
+                    if "scheduler_state_dict" in checkpoint:
+                        lr_scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+
+                    # Load training history if available
+                    if "train_losses" in checkpoint:
+                        train_losses = checkpoint["train_losses"]
+                    if "val_losses" in checkpoint:
+                        val_losses = checkpoint["val_losses"]
+                    if "val_ious" in checkpoint:
+                        val_ious = checkpoint["val_ious"]
+                    if "val_dices" in checkpoint:
+                        val_dices = checkpoint["val_dices"]
+
+                    print(f"Resuming training from epoch {start_epoch}")
+                    print(f"Previous best IoU: {best_iou:.4f}")
+                else:
+                    print("Loaded model weights only (not resuming training state)")
+            else:
+                # Assume it's just model weights
+                model.load_state_dict(checkpoint)
+                print("Loaded model weights only")
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to load checkpoint: {str(e)}")
 
     print(f"Starting training with {architecture} + {encoder_name}")
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+    if start_epoch > 0:
+        print(f"Resuming from epoch {start_epoch}/{num_epochs}")
 
     # Training loop
-    for epoch in range(num_epochs):
+    for epoch in range(start_epoch, num_epochs):
         # Train one epoch
         train_loss = train_semantic_one_epoch(
             model,
@@ -2077,6 +2388,10 @@ def train_segmentation_model(
                     "encoder_name": encoder_name,
                     "num_channels": num_channels,
                     "num_classes": num_classes,
+                    "train_losses": train_losses,
+                    "val_losses": val_losses,
+                    "val_ious": val_ious,
+                    "val_dices": val_dices,
                 },
                 os.path.join(output_dir, f"checkpoint_epoch_{epoch+1}.pth"),
             )
@@ -2094,7 +2409,9 @@ def train_segmentation_model(
     torch.save(history, os.path.join(output_dir, "training_history.pth"))
 
     # Save training summary
-    with open(os.path.join(output_dir, "training_summary.txt"), "w") as f:
+    with open(
+        os.path.join(output_dir, "training_summary.txt"), "w", encoding="utf-8"
+    ) as f:
         f.write(
             f"Training completed on: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         )
@@ -2163,6 +2480,7 @@ def semantic_inference_on_geotiff(
     num_channels=3,
     num_classes=2,
     device=None,
+    quiet=False,
     **kwargs,
 ):
     """
@@ -2178,15 +2496,14 @@ def semantic_inference_on_geotiff(
         num_channels (int): Number of channels to use from the input image.
         num_classes (int): Number of classes in the model output.
         device (torch.device, optional): Device to run inference on.
+        quiet (bool): If True, suppress progress bar. Defaults to False.
         **kwargs: Additional arguments.
 
     Returns:
         tuple: Tuple containing output path and inference time in seconds.
     """
     if device is None:
-        device = (
-            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        )
+        device = get_device()
 
     # Put model in evaluation mode
     model.to(device)
@@ -2215,9 +2532,14 @@ def semantic_inference_on_geotiff(
         last_x = width - window_size
 
         total_windows = steps_y * steps_x
-        print(f"Processing {total_windows} windows...")
+        if not quiet:
+            print(f"Processing {total_windows} windows...")
 
-        pbar = tqdm(total=total_windows)
+        if not quiet:
+            pbar = tqdm(total=total_windows)
+        else:
+            pbar = None
+
         batch_inputs = []
         batch_positions = []
         batch_count = 0
@@ -2325,9 +2647,11 @@ def semantic_inference_on_geotiff(
                     batch_inputs = []
                     batch_positions = []
                     batch_count = 0
-                    pbar.update(len(probs))
+                    if pbar is not None:
+                        pbar.update(len(probs))
 
-        pbar.close()
+        if pbar is not None:
+            pbar.close()
 
         # Calculate final mask by taking argmax of accumulated probabilities
         mask = np.zeros((height, width), dtype=np.uint8)
@@ -2352,18 +2676,300 @@ def semantic_inference_on_geotiff(
                 mask[valid_pixels], return_counts=True
             )
             bg_ratio = np.sum(mask == 0) / mask.size
-            print(
-                f"Predicted classes: {len(unique_classes)} classes, Background: {bg_ratio:.1%}"
-            )
+            if not quiet:
+                print(
+                    f"Predicted classes: {len(unique_classes)} classes, Background: {bg_ratio:.1%}"
+                )
 
         inference_time = time.time() - start_time
-        print(f"Inference completed in {inference_time:.2f} seconds")
+        if not quiet:
+            print(f"Inference completed in {inference_time:.2f} seconds")
 
         # Save output
+        out_dir = os.path.dirname(output_path)
+        os.makedirs(out_dir, exist_ok=True)
         with rasterio.open(output_path, "w", **out_meta) as dst:
             dst.write(mask, 1)
 
-        print(f"Saved prediction to {output_path}")
+        if not quiet:
+            print(f"Saved prediction to {output_path}")
+
+        return output_path, inference_time
+
+
+def semantic_inference_on_image(
+    model,
+    image_path,
+    output_path,
+    window_size=512,
+    overlap=256,
+    batch_size=4,
+    num_channels=3,
+    num_classes=2,
+    device=None,
+    binary_output=True,
+    quiet=False,
+    **kwargs,
+):
+    """
+    Perform semantic segmentation inference on a regular image (JPG, PNG, etc.) using a sliding window approach.
+
+    Args:
+        model (torch.nn.Module): Trained semantic segmentation model.
+        image_path (str): Path to input image file (JPG, PNG, etc.).
+        output_path (str): Path to save output mask image.
+        window_size (int): Size of sliding window for inference.
+        overlap (int): Overlap between adjacent windows.
+        batch_size (int): Batch size for inference.
+        num_channels (int): Number of channels to use from the input image.
+        num_classes (int): Number of classes in the model output.
+        device (torch.device, optional): Device to run inference on.
+        binary_output (bool): If True, convert multi-class output to binary (class > 0).
+        quiet (bool): If True, suppress progress bar. Defaults to False.
+        **kwargs: Additional arguments.
+
+    Returns:
+        tuple: Tuple containing output path and inference time in seconds.
+    """
+    from PIL import Image
+
+    if device is None:
+        device = get_device()
+
+    # Put model in evaluation mode
+    model.to(device)
+    model.eval()
+
+    # Open the image using PIL
+    with Image.open(image_path) as pil_img:
+        # Convert to RGB if needed
+        if pil_img.mode != "RGB":
+            pil_img = pil_img.convert("RGB")
+
+        # Convert to numpy array [H, W, C]
+        img_array = np.array(pil_img, dtype=np.uint8)
+        height, width = img_array.shape[:2]
+
+        # Convert to [C, H, W] format like rasterio
+        img_array = np.transpose(img_array, (2, 0, 1))
+
+        if not quiet:
+            print(f"Processing image: {width}x{height}")
+
+        # Initialize accumulator arrays for multi-class probability blending
+        prob_accumulator = np.zeros((num_classes, height, width), dtype=np.float32)
+        count_accumulator = np.zeros((height, width), dtype=np.float32)
+
+        # Calculate steps
+        steps_y = math.ceil((height - overlap) / (window_size - overlap))
+        steps_x = math.ceil((width - overlap) / (window_size - overlap))
+        last_y = height - window_size
+        last_x = width - window_size
+
+        total_windows = steps_y * steps_x
+        if not quiet:
+            print(f"Processing {total_windows} windows...")
+
+        if not quiet:
+            pbar = tqdm(total=total_windows)
+        else:
+            pbar = None
+
+        batch_inputs = []
+        batch_positions = []
+        batch_count = 0
+
+        start_time = time.time()
+
+        for i in range(steps_y + 1):
+            y = min(i * (window_size - overlap), last_y)
+            y = max(0, y)
+
+            if y > last_y and i > 0:
+                continue
+
+            for j in range(steps_x + 1):
+                x = min(j * (window_size - overlap), last_x)
+                x = max(0, x)
+
+                if x > last_x and j > 0:
+                    continue
+
+                # Extract window from image array
+                y_end = min(y + window_size, height)
+                x_end = min(x + window_size, width)
+                window = img_array[:, y:y_end, x:x_end]
+
+                if window.shape[1] == 0 or window.shape[2] == 0:
+                    continue
+
+                current_height = window.shape[1]
+                current_width = window.shape[2]
+
+                # Pad window to window_size if needed
+                if current_height < window_size or current_width < window_size:
+                    padded_window = np.zeros(
+                        (window.shape[0], window_size, window_size), dtype=window.dtype
+                    )
+                    padded_window[:, :current_height, :current_width] = window
+                    window = padded_window
+
+                # Normalize and prepare input
+                image = window.astype(np.float32) / 255.0
+
+                # Handle different number of channels
+                if image.shape[0] > num_channels:
+                    image = image[:num_channels]
+                elif image.shape[0] < num_channels:
+                    padded = np.zeros(
+                        (num_channels, image.shape[1], image.shape[2]), dtype=np.float32
+                    )
+                    padded[: image.shape[0]] = image
+                    image = padded
+
+                # Convert to tensor
+                image_tensor = torch.tensor(image, device=device)
+
+                # Add to batch
+                batch_inputs.append(image_tensor)
+                batch_positions.append((y, x, current_height, current_width))
+                batch_count += 1
+
+                # Process batch
+                if batch_count == batch_size or (i == steps_y and j == steps_x):
+                    with torch.no_grad():
+                        batch_tensor = torch.stack(batch_inputs)
+                        outputs = model(batch_tensor)
+
+                        # Apply softmax to get class probabilities
+                        probs = torch.softmax(outputs, dim=1)
+
+                    # Process each output in the batch
+                    for idx, prob in enumerate(probs):
+                        y_pos, x_pos, h, w = batch_positions[idx]
+
+                        # Create weight matrix for blending
+                        y_grid, x_grid = np.mgrid[0:h, 0:w]
+                        dist_from_left = x_grid
+                        dist_from_right = w - x_grid - 1
+                        dist_from_top = y_grid
+                        dist_from_bottom = h - y_grid - 1
+
+                        edge_distance = np.minimum.reduce(
+                            [
+                                dist_from_left,
+                                dist_from_right,
+                                dist_from_top,
+                                dist_from_bottom,
+                            ]
+                        )
+                        edge_distance = np.minimum(edge_distance, overlap / 2)
+
+                        # Avoid zero weights - use minimum weight of 0.1
+                        weight = np.maximum(edge_distance / (overlap / 2), 0.1)
+
+                        # For non-overlapping windows, use uniform weight
+                        if overlap == 0:
+                            weight = np.ones_like(weight)
+
+                        # Convert probabilities to numpy [C, H, W] - crop to actual size
+                        prob_np = prob.cpu().numpy()[:, :h, :w]
+
+                        # Accumulate weighted probabilities for each class
+                        y_slice = slice(y_pos, y_pos + h)
+                        x_slice = slice(x_pos, x_pos + w)
+
+                        # Add weighted probabilities for each class
+                        for class_idx in range(num_classes):
+                            prob_accumulator[class_idx, y_slice, x_slice] += (
+                                prob_np[class_idx] * weight
+                            )
+
+                        # Update weight accumulator
+                        count_accumulator[y_slice, x_slice] += weight
+
+                    # Reset batch
+                    batch_inputs = []
+                    batch_positions = []
+                    batch_count = 0
+                    if pbar is not None:
+                        pbar.update(len(probs))
+
+        if pbar is not None:
+            pbar.close()
+
+        # Calculate final mask by taking argmax of accumulated probabilities
+        mask = np.zeros((height, width), dtype=np.uint8)
+        valid_pixels = count_accumulator > 0
+
+        if np.any(valid_pixels):
+            # Normalize accumulated probabilities by weights
+            normalized_probs = np.zeros_like(prob_accumulator)
+            for class_idx in range(num_classes):
+                normalized_probs[class_idx, valid_pixels] = (
+                    prob_accumulator[class_idx, valid_pixels]
+                    / count_accumulator[valid_pixels]
+                )
+
+            # Take argmax to get final class predictions
+            mask[valid_pixels] = np.argmax(
+                normalized_probs[:, valid_pixels], axis=0
+            ).astype(np.uint8)
+
+            # Check class distribution in predictions before binary conversion
+            unique_classes, class_counts = np.unique(mask, return_counts=True)
+            # Convert numpy types to regular Python types for cleaner output
+            class_distribution = {
+                int(cls): int(count) for cls, count in zip(unique_classes, class_counts)
+            }
+            if not quiet:
+                print(f"Raw predicted classes and counts: {class_distribution}")
+
+            # Convert to binary if requested and num_classes == 2
+            if binary_output and num_classes == 2:
+                # For binary segmentation, convert class 1 to 255 (white) and class 0 to 0 (black)
+                # Use proper thresholding to ensure only 0 and 255 values
+                binary_mask = np.zeros_like(mask)
+                binary_mask[mask > 0] = 255
+                mask = binary_mask
+
+                # Final check
+                unique_classes, class_counts = np.unique(mask, return_counts=True)
+                # Convert numpy types to regular Python types for cleaner output
+                binary_distribution = {
+                    int(cls): int(count)
+                    for cls, count in zip(unique_classes, class_counts)
+                }
+                if not quiet:
+                    print(f"Binary predicted classes and counts: {binary_distribution}")
+
+        inference_time = time.time() - start_time
+        if not quiet:
+            print(f"Inference completed in {inference_time:.2f} seconds")
+
+        # Save output as image
+        # For binary masks, use PNG to avoid JPEG compression artifacts
+        if binary_output and num_classes == 2:
+            # Change extension to PNG if binary output to preserve exact values
+            output_path_png = os.path.splitext(output_path)[0] + ".png"
+            output_img = Image.fromarray(mask, mode="L")
+            out_dir = os.path.dirname(output_path)
+            os.makedirs(out_dir, exist_ok=True)
+            output_img.save(output_path_png)
+            if not quiet:
+                print(
+                    f"Saved binary prediction to {output_path_png} (PNG format to preserve exact values)"
+                )
+
+            # Also save the original requested format for compatibility
+            if output_path != output_path_png:
+                output_img.save(output_path)
+                print(f"Also saved to {output_path} (may have compression artifacts)")
+        else:
+            output_img = Image.fromarray(mask, mode="L")
+            output_img.save(output_path)
+            if not quiet:
+                print(f"Saved prediction to {output_path}")
 
         return output_path, inference_time
 
@@ -2380,14 +2986,18 @@ def semantic_segmentation(
     overlap=256,
     batch_size=4,
     device=None,
+    quiet=False,
     **kwargs,
 ):
     """
-    Perform semantic segmentation on a GeoTIFF using a trained model.
+    Perform semantic segmentation on an image file using a trained model.
+
+    This function automatically detects the input format and uses the appropriate
+    inference method for either GeoTIFF files or regular image formats (JPG, PNG, etc.).
 
     Args:
-        input_path (str): Path to input GeoTIFF file.
-        output_path (str): Path to save output mask GeoTIFF.
+        input_path (str): Path to input image file (GeoTIFF, JPG, PNG, etc.).
+        output_path (str): Path to save output mask file.
         model_path (str): Path to trained model weights.
         architecture (str): Model architecture used for training.
         encoder_name (str): Encoder backbone name used for training.
@@ -2397,14 +3007,22 @@ def semantic_segmentation(
         overlap (int): Overlap between adjacent windows.
         batch_size (int): Batch size for inference.
         device (torch.device, optional): Device to run inference on.
+        quiet (bool): If True, suppress progress bar. Defaults to False.
         **kwargs: Additional arguments.
 
     Returns:
         None: Output mask is saved to output_path.
     """
     if device is None:
-        device = (
-            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        device = get_device()
+
+    # Detect file format based on extension
+    input_ext = os.path.splitext(input_path)[1].lower()
+    is_geotiff = input_ext in [".tif", ".tiff"]
+
+    if not quiet:
+        print(
+            f"Input file format: {'GeoTIFF' if is_geotiff else 'Regular image'} ({input_ext})"
         )
 
     # Load model
@@ -2427,15 +3045,200 @@ def semantic_segmentation(
     model.to(device)
     model.eval()
 
-    semantic_inference_on_geotiff(
-        model=model,
-        geotiff_path=input_path,
-        output_path=output_path,
-        window_size=window_size,
-        overlap=overlap,
-        batch_size=batch_size,
-        num_channels=num_channels,
-        num_classes=num_classes,
-        device=device,
-        **kwargs,
+    # Use appropriate inference function based on file format
+    if is_geotiff:
+        semantic_inference_on_geotiff(
+            model=model,
+            geotiff_path=input_path,
+            output_path=output_path,
+            window_size=window_size,
+            overlap=overlap,
+            batch_size=batch_size,
+            num_channels=num_channels,
+            num_classes=num_classes,
+            device=device,
+            quiet=quiet,
+            **kwargs,
+        )
+    else:
+        # Create output directory if it doesn't exist
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        semantic_inference_on_image(
+            model=model,
+            image_path=input_path,
+            output_path=output_path,
+            window_size=window_size,
+            overlap=overlap,
+            batch_size=batch_size,
+            num_channels=num_channels,
+            num_classes=num_classes,
+            device=device,
+            binary_output=True,  # Convert to binary output for better visualization
+            quiet=quiet,
+            **kwargs,
+        )
+
+
+def semantic_segmentation_batch(
+    input_dir,
+    output_dir,
+    model_path,
+    architecture="unet",
+    encoder_name="resnet34",
+    num_channels=3,
+    num_classes=2,
+    window_size=512,
+    overlap=256,
+    batch_size=4,
+    device=None,
+    filenames=None,
+    quiet=False,
+    **kwargs,
+):
+    """
+    Perform semantic segmentation on a batch of images from an input directory.
+
+    This function processes all images in a directory and saves the results to an output directory.
+    It automatically detects the input format and uses the appropriate inference method for either
+    GeoTIFF files or regular image formats (JPG, PNG, etc.). For GeoTIFF inputs, outputs are saved
+    as GeoTIFF. For other formats, outputs are saved as PNG to preserve exact values.
+
+    Args:
+        input_dir (str): Directory containing input image files to process.
+        output_dir (str): Directory to save output mask files.
+        model_path (str): Path to trained model weights.
+        architecture (str): Model architecture used for training. Defaults to "unet".
+        encoder_name (str): Encoder backbone name used for training. Defaults to "resnet34".
+        num_channels (int): Number of channels in the input image and model. Defaults to 3.
+        num_classes (int): Number of classes in the model. Defaults to 2.
+        window_size (int): Size of sliding window for inference. Defaults to 512.
+        overlap (int): Overlap between adjacent windows. Defaults to 256.
+        batch_size (int): Batch size for inference. Defaults to 4.
+        device (torch.device, optional): Device to run inference on. If None, uses CUDA if available.
+        filenames (list, optional): List of output filenames. If None, defaults to
+            "<input_filename>_mask.<ext>" for each input file where <ext> is "tif" for GeoTIFF
+            inputs and "png" for other formats. If provided, must match the number of input files.
+        quiet (bool): If True, suppress progress bar. Defaults to False.
+        **kwargs: Additional arguments passed to the inference functions.
+
+    Returns:
+        None: Output masks are saved to output_dir.
+
+    Raises:
+        FileNotFoundError: If input_dir doesn't exist or contains no supported image files.
+        ValueError: If filenames is provided but doesn't match the number of input files.
+    """
+    if device is None:
+        device = get_device()
+
+    # Check if input directory exists
+    if not os.path.exists(input_dir):
+        raise FileNotFoundError(f"Input directory does not exist: {input_dir}")
+
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Get all supported image files
+    image_extensions = (".tif", ".tiff", ".png", ".jpg", ".jpeg")
+    image_files = sorted(
+        [
+            os.path.join(input_dir, f)
+            for f in os.listdir(input_dir)
+            if f.lower().endswith(image_extensions)
+        ]
     )
+
+    if len(image_files) == 0:
+        raise FileNotFoundError(f"No supported image files found in {input_dir}")
+
+    print(f"Found {len(image_files)} image files to process")
+
+    # Load model once for all images
+    model = get_smp_model(
+        architecture=architecture,
+        encoder_name=encoder_name,
+        encoder_weights=None,  # We're loading trained weights
+        in_channels=num_channels,
+        classes=num_classes,
+        activation=None,
+    )
+
+    if not os.path.exists(model_path):
+        try:
+            model_path = download_model_from_hf(model_path)
+        except Exception as e:
+            raise FileNotFoundError(f"Model file not found: {model_path}")
+
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.to(device)
+    model.eval()
+
+    # Generate output filenames if not provided
+    if filenames is None:
+        filenames = []
+        for image_file in image_files:
+            base_name = os.path.splitext(os.path.basename(image_file))[0]
+            input_ext = os.path.splitext(image_file)[1].lower()
+
+            # Use GeoTIFF extension for GeoTIFF inputs, PNG for others
+            if input_ext in [".tif", ".tiff"]:
+                output_ext = ".tif"
+            else:
+                output_ext = ".png"
+
+            output_filename = f"{base_name}_mask{output_ext}"
+            filenames.append(os.path.join(output_dir, output_filename))
+    else:
+        # Validate filenames list
+        if len(filenames) != len(image_files):
+            raise ValueError(
+                f"Number of filenames ({len(filenames)}) must match number of input files ({len(image_files)})"
+            )
+
+    # Process each image
+    for i, (input_path, output_path) in enumerate(zip(image_files, filenames)):
+        print(
+            f"Processing file {i + 1}/{len(image_files)}: {os.path.basename(input_path)}"
+        )
+
+        # Detect file format based on extension
+        input_ext = os.path.splitext(input_path)[1].lower()
+        is_geotiff = input_ext in [".tif", ".tiff"]
+
+        try:
+            # Use appropriate inference function based on file format
+            if is_geotiff:
+                semantic_inference_on_geotiff(
+                    model=model,
+                    geotiff_path=input_path,
+                    output_path=output_path,
+                    window_size=window_size,
+                    overlap=overlap,
+                    batch_size=batch_size,
+                    num_channels=num_channels,
+                    num_classes=num_classes,
+                    device=device,
+                    quiet=quiet,
+                    **kwargs,
+                )
+            else:
+                semantic_inference_on_image(
+                    model=model,
+                    image_path=input_path,
+                    output_path=output_path,
+                    window_size=window_size,
+                    overlap=overlap,
+                    batch_size=batch_size,
+                    num_channels=num_channels,
+                    num_classes=num_classes,
+                    device=device,
+                    binary_output=True,  # Convert to binary output for better visualization
+                    quiet=quiet,
+                    **kwargs,
+                )
+        except Exception as e:
+            print(f"Error processing {input_path}: {str(e)}")
+            continue
+
+    print(f"Batch processing completed. Results saved to {output_dir}")

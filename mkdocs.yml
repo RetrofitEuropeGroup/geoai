@@ -66,6 +66,9 @@ plugins:
                   "examples/globe_projection.ipynb",
                   "examples/samgeo.ipynb",
                   "examples/grounded_sam.ipynb",
+                  "examples/load_model_checkpoint.ipynb",
+                  "examples/water_detection.ipynb",
+                  "examples/batch_segmentation.ipynb",
                   "workshops/GeoAI_Workshop_2025.ipynb",
               ]
 
@@ -105,6 +108,7 @@ nav:
           - examples/create_vector.ipynb
           - examples/edit_vector.ipynb
           - examples/image_chips.ipynb
+          - examples/image_tiling.ipynb
           - examples/building_footprints_usa.ipynb
           - examples/building_footprints_africa.ipynb
           - examples/building_footprints_china.ipynb
@@ -130,6 +134,9 @@ nav:
           - examples/globe_projection.ipynb
           - examples/samgeo.ipynb
           - examples/grounded_sam.ipynb
+          - examples/load_model_checkpoint.ipynb
+          - examples/water_detection.ipynb
+          - examples/batch_segmentation.ipynb
           #   - examples/samgeo/satellite.ipynb
           #   - examples/samgeo/automatic_mask_generator.ipynb
           #   - examples/samgeo/automatic_mask_generator_hq.ipynb
