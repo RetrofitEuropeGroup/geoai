@@ -3000,7 +3000,8 @@ def export_geotiff_tiles(
                 break
 
         # Close progress bar
-        pbar.close()
+        if not quiet:
+            pbar.close()
 
         # Create overview image if requested
         if create_overview and stats["tile_coordinates"]:
