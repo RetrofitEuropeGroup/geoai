@@ -333,6 +333,98 @@ class RandomHorizontalFlip:
         return image, target
 
 
+class RandomRotation:
+    """Random rotation transform (90-degree increments only)."""
+
+    def __init__(self, prob=0.5):
+        """
+        Initialize random rotation.
+
+        Args:
+            prob (float): Probability of applying the rotation.
+        """
+        self.prob = prob
+
+    def __call__(self, image, target):
+        if random.random() < self.prob:
+            # Choose rotation: 0 (no rotation), 1 (90°), 2 (180°), 3 (270°)
+            k = random.randint(1, 3)  # Skip 0 (no rotation)
+
+            # Rotate image (dims=[1,2] for H,W dimensions)
+            image = torch.rot90(image, k=k, dims=[1, 2])
+
+            # Rotate masks if they exist
+            if "masks" in target and len(target["masks"]) > 0:
+                target["masks"] = torch.rot90(target["masks"], k=k, dims=[1, 2])
+
+            # Update boxes if they exist
+            if "boxes" in target and len(target["boxes"]) > 0:
+                boxes = target["boxes"].clone()
+                h, w = image.shape[1], image.shape[2]
+
+                for _ in range(k):
+                    # For each 90° rotation: (x,y) -> (h-y, x)
+                    new_boxes = boxes.clone()
+                    new_boxes[:, 0] = h - boxes[:, 3]  # new_xmin = h - old_ymax
+                    new_boxes[:, 1] = boxes[:, 0]  # new_ymin = old_xmin
+                    new_boxes[:, 2] = h - boxes[:, 1]  # new_xmax = h - old_ymin
+                    new_boxes[:, 3] = boxes[:, 2]  # new_ymax = old_xmax
+                    boxes = new_boxes
+                    h, w = w, h  # Swap dimensions for next rotation
+
+                target["boxes"] = boxes
+
+        return image, target
+
+
+class RandomColorJitter:
+    """Random color jittering transform for brightness, contrast, and saturation."""
+
+    def __init__(self, brightness=0.2, contrast=0.2, saturation=0.2, prob=0.5):
+        """
+        Initialize random color jitter.
+
+        Args:
+            brightness (float): Maximum change in brightness (0-1).
+            contrast (float): Maximum change in contrast (0-1).
+            saturation (float): Maximum change in saturation (0-1).
+            prob (float): Probability of applying the transform.
+        """
+        self.brightness = brightness
+        self.contrast = contrast
+        self.saturation = saturation
+        self.prob = prob
+
+    def __call__(self, image, target):
+        if random.random() < self.prob:
+            # Apply brightness adjustment
+            if self.brightness > 0:
+                brightness_factor = 1.0 + random.uniform(-self.brightness, self.brightness)
+                image = torch.clamp(image * brightness_factor, 0, 1)
+
+            # Apply contrast adjustment
+            if self.contrast > 0:
+                contrast_factor = 1.0 + random.uniform(-self.contrast, self.contrast)
+                # Calculate mean for each channel
+                mean = image.mean(dim=[1, 2], keepdim=True)
+                image = torch.clamp((image - mean) * contrast_factor + mean, 0, 1)
+
+            # Apply saturation adjustment (only for RGB channels)
+            if self.saturation > 0 and image.shape[0] >= 3:
+                saturation_factor = 1.0 + random.uniform(-self.saturation, self.saturation)
+                # Convert RGB to grayscale weights
+                gray_weights = torch.tensor([0.299, 0.587, 0.114], device=image.device, dtype=image.dtype)
+                gray = (image[:3] * gray_weights.view(3, 1, 1)).sum(dim=0, keepdim=True)
+
+                # Apply saturation to RGB channels
+                rgb_saturated = torch.clamp(
+                    (image[:3] - gray) * saturation_factor + gray, 0, 1
+                )
+                image[:3] = rgb_saturated
+
+        return image, target
+
+
 def get_transform(train):
     """
     Get transforms for data augmentation.
@@ -348,6 +440,13 @@ def get_transform(train):
 
     if train:
         transforms.append(RandomHorizontalFlip(0.5))
+        transforms.append(RandomRotation(0.3))  # 30% chance of rotation
+        transforms.append(RandomColorJitter(
+            brightness=0.2,
+            contrast=0.2,
+            saturation=0.2,
+            prob=0.5
+        ))
 
     return Compose(transforms)
 
@@ -1354,6 +1453,75 @@ class SemanticRandomHorizontalFlip:
         return image, mask
 
 
+class SemanticRandomRotation:
+    """Random rotation transform for semantic segmentation (90-degree increments only)."""
+
+    def __init__(self, prob=0.5):
+        """
+        Initialize random rotation for semantic segmentation.
+
+        Args:
+            prob (float): Probability of applying the rotation.
+        """
+        self.prob = prob
+
+    def __call__(self, image, mask):
+        if random.random() < self.prob:
+            # Choose rotation: 1 (90°), 2 (180°), 3 (270°)
+            k = random.randint(1, 3)
+
+            # Rotate image and mask
+            image = torch.rot90(image, k=k, dims=[1, 2])
+            mask = torch.rot90(mask, k=k, dims=[0, 1])
+
+        return image, mask
+
+
+class SemanticRandomColorJitter:
+    """Random color jittering transform for semantic segmentation."""
+
+    def __init__(self, brightness=0.2, contrast=0.2, saturation=0.2, prob=0.5):
+        """
+        Initialize random color jitter for semantic segmentation.
+
+        Args:
+            brightness (float): Maximum change in brightness (0-1).
+            contrast (float): Maximum change in contrast (0-1).
+            saturation (float): Maximum change in saturation (0-1).
+            prob (float): Probability of applying the transform.
+        """
+        self.brightness = brightness
+        self.contrast = contrast
+        self.saturation = saturation
+        self.prob = prob
+
+    def __call__(self, image, mask):
+        if random.random() < self.prob:
+            # Apply brightness adjustment
+            if self.brightness > 0:
+                brightness_factor = 1.0 + random.uniform(-self.brightness, self.brightness)
+                image = torch.clamp(image * brightness_factor, 0, 1)
+
+            # Apply contrast adjustment
+            if self.contrast > 0:
+                contrast_factor = 1.0 + random.uniform(-self.contrast, self.contrast)
+                mean = image.mean(dim=[1, 2], keepdim=True)
+                image = torch.clamp((image - mean) * contrast_factor + mean, 0, 1)
+
+            # Apply saturation adjustment (only for RGB channels)
+            if self.saturation > 0 and image.shape[0] >= 3:
+                saturation_factor = 1.0 + random.uniform(-self.saturation, self.saturation)
+                gray_weights = torch.tensor([0.299, 0.587, 0.114], device=image.device, dtype=image.dtype)
+                gray = (image[:3] * gray_weights.view(3, 1, 1)).sum(dim=0, keepdim=True)
+
+                rgb_saturated = torch.clamp(
+                    (image[:3] - gray) * saturation_factor + gray, 0, 1
+                )
+                image[:3] = rgb_saturated
+
+        return image, mask
+
+
 def get_semantic_transform(train):
     """
     Get transforms for semantic segmentation data augmentation.
@@ -1369,6 +1537,13 @@ def get_semantic_transform(train):
 
     if train:
         transforms.append(SemanticRandomHorizontalFlip(0.5))
+        transforms.append(SemanticRandomRotation(0.3))  # 30% chance of rotation
+        transforms.append(SemanticRandomColorJitter(
+            brightness=0.2,
+            contrast=0.2,
+            saturation=0.2,
+            prob=0.5
+        ))
 
     return SemanticTransforms(transforms)
 
