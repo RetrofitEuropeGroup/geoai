@@ -2695,11 +2695,12 @@ def export_geotiff_tiles(
                 raise ValueError(f"Error processing vector data: {e}")
 
         # Create progress bar
-        pbar = tqdm(
-            total=min(total_tiles, max_tiles),
-            desc="Generating tiles",
-            bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
-        )
+        if not quiet:
+            pbar = tqdm(
+                total=min(total_tiles, max_tiles),
+                desc="Generating tiles",
+                bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
+            )
 
         # Track statistics for summary
         stats = {
@@ -2811,7 +2812,8 @@ def export_geotiff_tiles(
                                         label_mask
                                     )
                             except Exception as e:
-                                pbar.write(f"Error reading class raster window: {e}")
+                                if not quiet:
+                                    pbar.write(f"Error reading class raster window: {e}")
                                 stats["errors"] += 1
                 else:
                     # For vector class data
@@ -2853,12 +2855,14 @@ def export_geotiff_tiles(
                                                 "has_features"
                                             ] = True
                                 except Exception as e:
-                                    pbar.write(f"Error rasterizing feature {idx}: {e}")
+                                    if not quiet:
+                                        pbar.write(f"Error rasterizing feature {idx}: {e}")
                                     stats["errors"] += 1
 
                 # Skip tile if no features and skip_empty_tiles is True
                 if skip_empty_tiles and not has_features:
-                    pbar.update(1)
+                    if not quiet:
+                        pbar.update(1)
                     tile_index += 1
                     continue
 
@@ -2885,7 +2889,8 @@ def export_geotiff_tiles(
                         dst.write(image_data)
                     stats["total_tiles"] += 1
                 except Exception as e:
-                    pbar.write(f"ERROR saving image GeoTIFF: {e}")
+                    if not quiet:
+                        pbar.write(f"ERROR saving image GeoTIFF: {e}")
                     stats["errors"] += 1
 
                 # Create profile for label GeoTIFF
@@ -2909,7 +2914,8 @@ def export_geotiff_tiles(
                         stats["tiles_with_features"] += 1
                         stats["feature_pixels"] += np.count_nonzero(label_mask)
                 except Exception as e:
-                    pbar.write(f"ERROR saving label GeoTIFF: {e}")
+                    if not quiet:
+                        pbar.write(f"ERROR saving label GeoTIFF: {e}")
                     stats["errors"] += 1
 
                 # Create XML annotation for object detection if using vector class data
@@ -2980,10 +2986,11 @@ def export_geotiff_tiles(
                     tree.write(xml_path)
 
                 # Update progress bar
-                pbar.update(1)
-                pbar.set_description(
-                    f"Generated: {stats['total_tiles']}, With features: {stats['tiles_with_features']}"
-                )
+                if not quiet:
+                    pbar.update(1)
+                    pbar.set_description(
+                        f"Generated: {stats['total_tiles']}, With features: {stats['tiles_with_features']}"
+                    )
 
                 tile_index += 1
                 if tile_index >= max_tiles:
