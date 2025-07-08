@@ -2766,15 +2766,20 @@ def export_geotiff_tiles(
                         class_bounds = class_src.bounds
 
                         # Check if windows overlap
-                        if (
-                            src_bounds.left > class_bounds.right
-                            or src_bounds.right < class_bounds.left
-                            or src_bounds.bottom > class_bounds.top
-                            or src_bounds.top < class_bounds.bottom
-                        ):
-                            warnings.warn(
-                                "Class raster and input raster do not overlap."
-                            )
+                        # Check if tile window overlaps with class raster
+                        tile_bounds = rasterio.windows.bounds(window, src.transform)
+                        class_window = rasterio.windows.from_bounds(*tile_bounds, class_src.transform)
+
+                        # Check if windows intersect using rasterio's intersection
+                        intersect_window = rasterio.windows.intersection(class_window,
+                                                                         rasterio.windows.Window(0, 0, class_src.width,
+                                                                                                 class_src.height))
+
+                        if intersect_window.width <= 0 or intersect_window.height <= 0:
+                            # No overlap, skip this tile or fill with background
+                            print(f"no overlap: {intersect_window}")
+                            exit()
+                            continue
                         else:
                             # Get corresponding window in class raster
                             window_class = rasterio.windows.from_bounds(
