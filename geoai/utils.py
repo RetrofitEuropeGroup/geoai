@@ -2778,8 +2778,6 @@ def export_geotiff_tiles(
 
                         if intersect_window.width <= 0 or intersect_window.height <= 0:
                             # No overlap, skip this tile or fill with background
-                            print(f"no overlap: {intersect_window}")
-                            exit()
                             continue
                         else:
                             # Get corresponding window in class raster
@@ -2812,8 +2810,7 @@ def export_geotiff_tiles(
                                         label_mask
                                     )
                             except Exception as e:
-                                if not quiet:
-                                    pbar.write(f"Error reading class raster window: {e}")
+                                pbar.write(f"Error reading class raster window: {e}")
                                 stats["errors"] += 1
                 else:
                     # For vector class data
@@ -3000,8 +2997,7 @@ def export_geotiff_tiles(
                 break
 
         # Close progress bar
-        if not quiet:
-            pbar.close()
+        pbar.close()
 
         # Create overview image if requested
         if create_overview and stats["tile_coordinates"]:

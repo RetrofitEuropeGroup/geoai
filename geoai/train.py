@@ -1694,7 +1694,7 @@ def get_semantic_transform(train):
 
     if train:
         transforms.append(SemanticRandomHorizontalFlip(0.5))
-        transforms.append(SemanticRandomRotation(0.3))  # 30% chance of rotation
+        transforms.append(SemanticRandomRotation(0.3))
         transforms.append(SemanticRandomColorJitter(
             brightness=0.2,
             contrast=0.2,
@@ -2004,6 +2004,8 @@ def train_segmentation_model(
     weight_decay=1e-4,
     seed=42,
     val_split=0.2,
+    test_split=0.1,
+    split_function=None,
     print_freq=10,
     verbose=True,
     save_best_only=True,
@@ -2130,9 +2132,15 @@ def train_segmentation_model(
         raise FileNotFoundError("No matching image and label files found")
 
     # Split data into train and validation sets
-    train_imgs, val_imgs, train_labels, val_labels = train_test_split(
-        image_files, label_files, test_size=val_split, random_state=seed
-    )
+    if split_function:
+        print("Using custom split function for train/val split...")
+        train_imgs, val_imgs, train_labels, val_labels = split_function(
+            image_files, label_files, seed=seed, val_split=val_split, test_split=test_split
+        )
+    else:
+        train_imgs, val_imgs, train_labels, val_labels = train_test_split(
+            image_files, label_files, test_size=val_split, random_state=seed
+        )
 
     print(f"Training on {len(train_imgs)} images, validating on {len(val_imgs)} images")
 
