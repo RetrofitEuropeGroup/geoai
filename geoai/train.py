@@ -1678,7 +1678,7 @@ def get_semantic_transform(train):
     if train:
         transforms.append(SemanticRandomHorizontalFlip(0.5))
         transforms.append(SemanticRandomRotation())
-        transforms.append(SemanticRandomColorJitter(
+        transforms.append(SemanticColorJitter(
             brightness=0.2,
             contrast=0.2,
             saturation=0.2,
