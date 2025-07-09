@@ -1612,70 +1612,52 @@ class SemanticRandomHorizontalFlip:
 
 
 class SemanticRandomRotation:
-    """Random rotation transform for semantic segmentation (90-degree increments only)."""
+    """Random rotation transform for semantic segmentation."""
 
-    def __init__(self, prob=0.5):
-        """
-        Initialize random rotation for semantic segmentation.
-
-        Args:
-            prob (float): Probability of applying the rotation.
-        """
-        self.prob = prob
+    def __init__(self, degrees=90):
+        self.degrees = degrees
 
     def __call__(self, image, mask):
-        if random.random() < self.prob:
-            # Choose rotation: 1 (90°), 2 (180°), 3 (270°)
-            k = random.randint(1, 3)
+        if random.random() > 0.5:
+            # angle is either positive or negative 90
+            angle = random.choice([-self.degrees, self.degrees])
 
-            # Rotate image and mask
-            image = torch.rot90(image, k=k, dims=[1, 2])
-            mask = torch.rot90(mask, k=k, dims=[0, 1])
+            # Apply rotation to image (C, H, W)
+            image = torchvision.transforms.functional.rotate(image, angle, expand=False)
+
+            # Apply same rotation to mask (H, W)
+            mask = torchvision.transforms.functional.rotate(
+                mask.unsqueeze(0), angle, expand=False, interpolation=torchvision.transforms.InterpolationMode.NEAREST
+            ).squeeze(0)
 
         return image, mask
 
 
-class SemanticRandomColorJitter:
-    """Random color jittering transform for semantic segmentation."""
+class SemanticColorJitter:
+    """Apply color jitter to image only (not mask)."""
 
-    def __init__(self, brightness=0.2, contrast=0.2, saturation=0.2, prob=0.5):
-        """
-        Initialize random color jitter for semantic segmentation.
-
-        Args:
-            brightness (float): Maximum change in brightness (0-1).
-            contrast (float): Maximum change in contrast (0-1).
-            saturation (float): Maximum change in saturation (0-1).
-            prob (float): Probability of applying the transform.
-        """
-        self.brightness = brightness
-        self.contrast = contrast
-        self.saturation = saturation
-        self.prob = prob
+    def __init__(self, brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1):
+        self.color_jitter = torchvision.transforms.ColorJitter(
+            brightness=brightness,
+            contrast=contrast,
+            saturation=saturation,
+            hue=hue
+        )
 
     def __call__(self, image, mask):
-        if random.random() < self.prob:
-            # Apply brightness adjustment
-            if self.brightness > 0:
-                brightness_factor = 1.0 + random.uniform(-self.brightness, self.brightness)
-                image = torch.clamp(image * brightness_factor, 0, 1)
+        # Only apply to RGB channels if image has more than 3 channels
+        if image.shape[0] >= 3:
+            rgb_channels = image[:3]
+            other_channels = image[3:] if image.shape[0] > 3 else None
 
-            # Apply contrast adjustment
-            if self.contrast > 0:
-                contrast_factor = 1.0 + random.uniform(-self.contrast, self.contrast)
-                mean = image.mean(dim=[1, 2], keepdim=True)
-                image = torch.clamp((image - mean) * contrast_factor + mean, 0, 1)
+            # Apply color jitter to RGB
+            rgb_transformed = self.color_jitter(rgb_channels)
 
-            # Apply saturation adjustment (only for RGB channels)
-            if self.saturation > 0 and image.shape[0] >= 3:
-                saturation_factor = 1.0 + random.uniform(-self.saturation, self.saturation)
-                gray_weights = torch.tensor([0.299, 0.587, 0.114], device=image.device, dtype=image.dtype)
-                gray = (image[:3] * gray_weights.view(3, 1, 1)).sum(dim=0, keepdim=True)
-
-                rgb_saturated = torch.clamp(
-                    (image[:3] - gray) * saturation_factor + gray, 0, 1
-                )
-                image[:3] = rgb_saturated
+            if other_channels is not None:
+                # Recombine with other channels
+                image = torch.cat([rgb_transformed, other_channels], dim=0)
+            else:
+                image = rgb_transformed
 
         return image, mask
 
@@ -1695,12 +1677,12 @@ def get_semantic_transform(train):
 
     if train:
         transforms.append(SemanticRandomHorizontalFlip(0.5))
-        transforms.append(SemanticRandomRotation(0.3))
+        transforms.append(SemanticRandomRotation())
         transforms.append(SemanticRandomColorJitter(
             brightness=0.2,
             contrast=0.2,
             saturation=0.2,
-            prob=0.5
+            hue=0.1
         ))
 
     return SemanticTransforms(transforms)
