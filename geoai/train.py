@@ -1611,34 +1611,34 @@ class SemanticRandomHorizontalFlip:
             mask = torch.flip(mask, dims=[1])
         return image, mask
 
+class SemanticRandomTransform:
+    """Random transforms for semantic segmentation."""
 
-class SemanticRandomRotation:
-    """Random rotation transform for semantic segmentation."""
-
-    def __init__(self, degrees=90, prob=0.5):
-        self.degrees = degrees
+    def __init__(self, prob=0.5):
         self.prob = prob
 
     def __call__(self, image, mask):
         if random.random() < self.prob:
-            # angle is either positive or negative 90
-            angle = random.choice([-self.degrees, self.degrees])
-
-            # Apply rotation to image (C, H, W)
-            image = torchvision.transforms.functional.rotate(image, angle, expand=False)
-
-            # Apply same rotation to mask (H, W)
-            mask = torchvision.transforms.functional.rotate(
-                mask.unsqueeze(0), angle, expand=False, interpolation=torchvision.transforms.InterpolationMode.NEAREST
-            ).squeeze(0)
+            # Flip image and mask along width dimension
+            image = torch.flip(image, dims=[2])
+            mask = torch.flip(mask, dims=[1])
+        if random.random() < self.prob:
+            # Flip image and mask along height dimension
+            image = torch.flip(image, dims=[1])
+            mask = torch.flip(mask, dims=[0])
+        if random.random() < self.prob:
+            # rotate image and mask by +- 90 degrees
+            angle = random.choice([-90, 90])
+            image = torch.rot90(image, k=angle // 90, dims=[1, 2])
+            # For mask, use dims=[0, 1] because it's HW format (not CHW)
+            mask = torch.rot90(mask, k=angle // 90, dims=[0, 1])
 
         return image, mask
-
 
 class SemanticColorJitter:
     """Apply color jitter to image only (not mask)."""
 
-    def __init__(self, brightness=0.3, contrast=0.2, saturation=0.2, hue=0.1):
+    def __init__(self, brightness=0.4, contrast=0.2, saturation=0.2, hue=0.1):
         self.color_jitter = torchvision.transforms.ColorJitter(
             brightness=brightness,
             contrast=contrast,
@@ -1678,8 +1678,7 @@ def get_semantic_transform(train):
     transforms.append(SemanticToTensor())
 
     if train:
-        transforms.append(SemanticRandomHorizontalFlip())
-        transforms.append(SemanticRandomRotation())
+        transforms.append(SemanticRandomTransform())
         transforms.append(SemanticColorJitter(
             brightness=0.2,
             contrast=0.2,
