@@ -2081,7 +2081,7 @@ def train_segmentation_model(
     np.random.seed(seed)
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.benchmark = True
 
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
@@ -2280,9 +2280,9 @@ def train_segmentation_model(
     if weights and len(weights) == num_classes:
         print("Using custom weights for loss function:", weights)
         weights = torch.tensor(weights, dtype=torch.float32, device=device)
-        criterion = torch.nn.CrossEntropyLoss(weights, label_smoothing=0.1)
+        criterion = torch.nn.CrossEntropyLoss(weights, label_smoothing=0.2)
     else:
-        criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
+        criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.2)
 
     # Set up optimizer
     optimizer = torch.optim.Adam(
