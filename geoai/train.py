@@ -1932,7 +1932,7 @@ def train_semantic_one_epoch(
             current_lr = optimizer.param_groups[0]['lr']
             if verbose:
                 print(
-                    f"Epoch: {epoch}, Batch: {i}/{num_batches}, Loss: {loss.item():.4f}, LR: {current_lr:.2f} Time: {elapsed_time:.2f}s"
+                    f"Epoch: {epoch}, Batch: {i}/{num_batches}, Loss: {loss.item():.4f}, LR: {current_lr:.5f} Time: {elapsed_time:.2f}s"
                 )
             start_time = time.time()
 
@@ -1979,8 +1979,6 @@ def evaluate_semantic(model, data_loader, device, criterion, num_classes=2):
                 dice_scores.append(dice)
                 iou_scores.append(iou)
 
-            lr_scheduler.step()
-
     # Calculate metrics
     avg_loss = total_loss / num_batches
     avg_dice = sum(dice_scores) / len(dice_scores) if dice_scores else 0
@@ -2002,7 +2000,7 @@ def train_segmentation_model(
     num_epochs=50,
     weights=None,
     use_mixed_precision=True,
-    learning_rate=1e-5,
+    learning_rate=4e-5,
     weight_decay=1e-4,
     seed=42,
     val_split=0.2,
@@ -2292,8 +2290,8 @@ def train_segmentation_model(
     )
 
     # Set up learning rate scheduler
-    lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optimizer, max_lr=learning_rate*10, steps_per_epoch=len(train_loader), epochs=num_epochs
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=5
     )
 
     # Initialize tracking variables
@@ -2380,6 +2378,9 @@ def train_segmentation_model(
         val_losses.append(eval_metrics["loss"])
         val_ious.append(eval_metrics["IoU"])
         val_dices.append(eval_metrics["Dice"])
+
+        # Update learning rate
+        lr_scheduler.step(eval_metrics["loss"])
 
         # Print metrics
         print(
