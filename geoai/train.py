@@ -17,6 +17,7 @@ from rasterio.windows import Window
 from skimage import measure
 from typing import Optional, Callable
 from sklearn.model_selection import train_test_split
+from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader, Dataset
 from torchvision.models.detection import maskrcnn_resnet50_fpn
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
@@ -1926,11 +1927,14 @@ def train_semantic_one_epoch(
         total_loss += loss.item()
 
         # Print progress
-        if i % print_freq == 0 and verbose:
-            current_lr = optimizer.param_groups[0]["lr"]
-            print(f"Epoch [{epoch + 1}][{i + 1}/{num_batches}] "
-                  f"Loss: {loss.item():.4f} "
-                  f"LR: {current_lr:.6f}")
+        if i % print_freq == 0:
+            elapsed_time = time.time() - start_time
+            current_lr = optimizer.param_groups[0]['lr']
+            if verbose:
+                print(
+                    f"Epoch: {epoch}, Batch: {i}/{num_batches}, Loss: {loss.item():.4f}, LR: {current_lr:.2f} Time: {elapsed_time:.2f}s"
+                )
+            start_time = time.time()
 
     # Calculate average loss
     avg_loss = total_loss / num_batches
@@ -1975,6 +1979,8 @@ def evaluate_semantic(model, data_loader, device, criterion, num_classes=2):
                 dice_scores.append(dice)
                 iou_scores.append(iou)
 
+            lr_scheduler.step()
+
     # Calculate metrics
     avg_loss = total_loss / num_batches
     avg_dice = sum(dice_scores) / len(dice_scores) if dice_scores else 0
@@ -1996,7 +2002,7 @@ def train_segmentation_model(
     num_epochs=50,
     weights=None,
     use_mixed_precision=True,
-    learning_rate=0.001,
+    learning_rate=1e-5,
     weight_decay=1e-4,
     seed=42,
     val_split=0.2,
@@ -2287,7 +2293,7 @@ def train_segmentation_model(
 
     # Set up learning rate scheduler
     lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optimizer, max_lr=learning_rate, steps_per_epoch=len(train_loader), epochs=num_epochs
+        optimizer, max_lr=learning_rate*10, steps_per_epoch=len(train_loader), epochs=num_epochs
     )
 
     # Initialize tracking variables
@@ -2374,9 +2380,6 @@ def train_segmentation_model(
         val_losses.append(eval_metrics["loss"])
         val_ious.append(eval_metrics["IoU"])
         val_dices.append(eval_metrics["Dice"])
-
-        # Update learning rate
-        lr_scheduler.step(eval_metrics["loss"])
 
         # Print metrics
         print(
