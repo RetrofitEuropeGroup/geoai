@@ -1614,11 +1614,12 @@ class SemanticRandomHorizontalFlip:
 class SemanticRandomRotation:
     """Random rotation transform for semantic segmentation."""
 
-    def __init__(self, degrees=90):
+    def __init__(self, degrees=90, prob=0.5):
         self.degrees = degrees
+        self.prob = prob
 
     def __call__(self, image, mask):
-        if random.random() > 0.5:
+        if random.random() < self.prob:
             # angle is either positive or negative 90
             angle = random.choice([-self.degrees, self.degrees])
 
@@ -1636,7 +1637,7 @@ class SemanticRandomRotation:
 class SemanticColorJitter:
     """Apply color jitter to image only (not mask)."""
 
-    def __init__(self, brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1):
+    def __init__(self, brightness=0.3, contrast=0.2, saturation=0.2, hue=0.1):
         self.color_jitter = torchvision.transforms.ColorJitter(
             brightness=brightness,
             contrast=contrast,
@@ -1676,7 +1677,7 @@ def get_semantic_transform(train):
     transforms.append(SemanticToTensor())
 
     if train:
-        transforms.append(SemanticRandomHorizontalFlip(0.5))
+        transforms.append(SemanticRandomHorizontalFlip())
         transforms.append(SemanticRandomRotation())
         transforms.append(SemanticColorJitter(
             brightness=0.2,
@@ -1870,10 +1871,11 @@ def iou_coefficient(pred, target, smooth=1e-6, num_classes=None):
 
 
 def train_semantic_one_epoch(
-    model, optimizer, data_loader, device, epoch, criterion, print_freq=10, verbose=True
+    model, optimizer, data_loader, device, epoch, criterion, print_freq=10, verbose=True,
+    scaler=None  # Add scaler parameter for mixed precision
 ):
     """
-    Train the semantic segmentation model for one epoch.
+    Train the semantic segmentation model for one epoch with optional mixed precision.
 
     Args:
         model (torch.nn.Module): The model to train.
@@ -1884,6 +1886,7 @@ def train_semantic_one_epoch(
         criterion: Loss function.
         print_freq (int): How often to print progress.
         verbose (bool): Whether to print detailed progress.
+        scaler (torch.cuda.amp.GradScaler, optional): Gradient scaler for mixed precision training.
 
     Returns:
         float: Average loss for the epoch.
@@ -1899,31 +1902,39 @@ def train_semantic_one_epoch(
         images = images.to(device)
         targets = targets.to(device)
 
-        # Forward pass
-        outputs = model(images)
-        loss = criterion(outputs, targets)
+        # Forward pass with mixed precision where available
+        if scaler is not None:
+            with torch.cuda.amp.autocast():
+                outputs = model(images)
+                loss = criterion(outputs, targets)
 
-        # Backward pass
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+            # Backward pass with gradient scaling
+            optimizer.zero_grad()
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            # Original path without mixed precision
+            outputs = model(images)
+            loss = criterion(outputs, targets)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
         # Track loss
         total_loss += loss.item()
 
         # Print progress
-        if i % print_freq == 0:
-            elapsed_time = time.time() - start_time
-            if verbose:
-                print(
-                    f"Epoch: {epoch}, Batch: {i}/{num_batches}, Loss: {loss.item():.4f}, Time: {elapsed_time:.2f}s"
-                )
-            start_time = time.time()
+        if i % print_freq == 0 and verbose:
+            current_lr = optimizer.param_groups[0]["lr"]
+            print(f"Epoch [{epoch + 1}][{i + 1}/{num_batches}] "
+                  f"Loss: {loss.item():.4f} "
+                  f"LR: {current_lr:.6f}")
 
     # Calculate average loss
     avg_loss = total_loss / num_batches
     return avg_loss
-
 
 def evaluate_semantic(model, data_loader, device, criterion, num_classes=2):
     """
@@ -1983,6 +1994,8 @@ def train_segmentation_model(
     num_classes=2,
     batch_size=8,
     num_epochs=50,
+    weights=None,
+    use_mixed_precision=True,
     learning_rate=0.001,
     weight_decay=1e-4,
     seed=42,
@@ -2073,6 +2086,12 @@ def train_segmentation_model(
     if device is None:
         device = get_device()
     print(f"Using device: {device}")
+
+    # Initialize mixed precision scaler if requested and supported
+    scaler = None
+    if use_mixed_precision and device.type == 'cuda' and torch.cuda.is_available():
+        scaler = torch.cuda.amp.GradScaler()
+        print("Using mixed precision training (FP16)")
 
     # Get all image and label files
     # Support multiple image formats: GeoTIFF, PNG, JPG, JPEG, TIF, TIFF
@@ -2254,8 +2273,11 @@ def train_segmentation_model(
     )
     model.to(device)
 
-    # Set up loss function (CrossEntropyLoss for multi-class, can also use DiceLoss)
-    criterion = torch.nn.CrossEntropyLoss()
+    if weights and len(weights) == num_classes:
+        print("Using custom weights for loss function:", weights)
+        criterion = torch.nn.CrossEntropyLoss(weights, label_smoothing=0.1)
+    else:
+        criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
 
     # Set up optimizer
     optimizer = torch.optim.Adam(
@@ -2340,6 +2362,7 @@ def train_segmentation_model(
             criterion,
             print_freq,
             verbose,
+            scaler
         )
         train_losses.append(train_loss)
 
@@ -2390,17 +2413,17 @@ def train_segmentation_model(
                 os.path.join(output_dir, f"checkpoint_epoch_{epoch+1}.pth"),
             )
 
+        # Save training history
+        history = {
+            "train_losses": train_losses,
+            "val_losses": val_losses,
+            "val_ious": val_ious,
+            "val_dices": val_dices,
+        }
+        torch.save(history, os.path.join(output_dir, "training_history.pth"))
+
     # Save final model
     torch.save(model.state_dict(), os.path.join(output_dir, "final_model.pth"))
-
-    # Save training history
-    history = {
-        "train_losses": train_losses,
-        "val_losses": val_losses,
-        "val_ious": val_ious,
-        "val_dices": val_dices,
-    }
-    torch.save(history, os.path.join(output_dir, "training_history.pth"))
 
     # Save training summary
     with open(
