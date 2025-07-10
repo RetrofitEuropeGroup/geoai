@@ -2286,8 +2286,8 @@ def train_segmentation_model(
     )
 
     # Set up learning rate scheduler
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=5
+    lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        optimizer, max_lr=learning_rate, steps_per_epoch=len(train_loader), epochs=num_epochs
     )
 
     # Initialize tracking variables
