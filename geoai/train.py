@@ -2275,6 +2275,7 @@ def train_segmentation_model(
 
     if weights and len(weights) == num_classes:
         print("Using custom weights for loss function:", weights)
+        weights = torch.tensor(weights, dtype=torch.float32, device=device)
         criterion = torch.nn.CrossEntropyLoss(weights, label_smoothing=0.1)
     else:
         criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
