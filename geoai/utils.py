@@ -2655,7 +2655,7 @@ def export_geotiff_tiles(
                     )
 
                 # Create class mapping
-                class_to_id = {int(cls): i + 1 for i, cls in enumerate(unique_classes)}
+                class_to_id = {int(cls): int(cls) for i, cls in enumerate(unique_classes)}
         else:
             # Load vector class data
             try:
@@ -3376,7 +3376,7 @@ def _process_image_mask_pair(
                 ]  # Remove 0 as it's typically background
 
                 # Create class mapping
-                class_to_id = {int(cls): i + 1 for i, cls in enumerate(unique_classes)}
+                class_to_id = {int(cls): int(cls) for i, cls in enumerate(unique_classes)}
         else:
             # Load vector class data
             try:
