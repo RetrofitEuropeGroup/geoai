@@ -1931,7 +1931,7 @@ def train_semantic_one_epoch(
             current_lr = optimizer.param_groups[0]['lr']
             if verbose:
                 print(
-                    f"Epoch: {epoch}, Batch: {i}/{num_batches}, Loss: {loss.item():.4f}, LR: {current_lr:.5f} Time: {elapsed_time:.2f}s"
+                    f"Epoch: {epoch}, Batch: {i}/{num_batches}, Loss: {loss.item():.4f}, LR: {current_lr} Time: {elapsed_time:.2f}s"
                 )
             start_time = time.time()
 
