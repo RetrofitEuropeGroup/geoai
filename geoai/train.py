@@ -1985,6 +1985,84 @@ def evaluate_semantic(model, data_loader, device, criterion, num_classes=2):
 
     return {"loss": avg_loss, "Dice": avg_dice, "IoU": avg_iou}
 
+class DiceLoss(torch.nn.Module):
+    """Dice Loss for semantic segmentation."""
+
+    def __init__(self, smooth=1e-6, ignore_index=None):
+        super(DiceLoss, self).__init__()
+        self.smooth = smooth
+        self.ignore_index = ignore_index
+
+    def forward(self, predictions, targets):
+        # Apply softmax to predictions
+        predictions = torch.softmax(predictions, dim=1)
+
+        # Handle ignore_index if specified
+        if self.ignore_index is not None:
+            mask = targets != self.ignore_index
+            targets = targets * mask
+            predictions = predictions * mask.unsqueeze(1)
+
+        # Calculate dice for each class
+        dice_scores = []
+        num_classes = predictions.shape[1]
+
+        for class_idx in range(num_classes):
+            pred_class = predictions[:, class_idx]
+            target_class = (targets == class_idx).float()
+
+            intersection = (pred_class * target_class).sum()
+            union = pred_class.sum() + target_class.sum()
+
+            dice = (2.0 * intersection + self.smooth) / (union + self.smooth)
+            dice_scores.append(dice)
+
+        # Return 1 - mean dice (so we minimize the loss)
+        return 1.0 - torch.stack(dice_scores).mean()
+
+
+class FocalLoss(torch.nn.Module):
+    """Focal Loss for addressing class imbalance."""
+
+    def __init__(self, alpha=1.0, gamma=2.0, ignore_index=None, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.ignore_index = ignore_index
+        self.reduction = reduction
+
+    def forward(self, predictions, targets):
+        # Calculate cross entropy
+        ce_loss = F.cross_entropy(predictions, targets, ignore_index=self.ignore_index, reduction='none')
+
+        # Calculate p_t
+        pt = torch.exp(-ce_loss)
+
+        # Calculate focal loss
+        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:
+            return focal_loss
+
+
+class CombinedLoss(torch.nn.Module):
+    """Combined Dice + Focal Loss."""
+
+    def __init__(self, dice_weight=0.5, focal_weight=0.5, alpha=1.0, gamma=2.0, smooth=1e-6, ignore_index=None):
+        super(CombinedLoss, self).__init__()
+        self.dice_weight = dice_weight
+        self.focal_weight = focal_weight
+        self.dice_loss = DiceLoss(smooth=smooth, ignore_index=ignore_index)
+        self.focal_loss = FocalLoss(alpha=alpha, gamma=gamma, ignore_index=ignore_index)
+
+    def forward(self, predictions, targets):
+        dice = self.dice_loss(predictions, targets)
+        focal = self.focal_loss(predictions, targets)
+        return self.dice_weight * dice + self.focal_weight * focal
 
 def train_segmentation_model(
     images_dir,
@@ -2277,11 +2355,24 @@ def train_segmentation_model(
     model.to(device)
 
     if weights and len(weights) == num_classes:
-        print("Using custom weights for loss function:", weights)
-        weights = torch.tensor(weights, dtype=torch.float32, device=device)
-        criterion = torch.nn.CrossEntropyLoss(weights, label_smoothing=0.2)
+        print("Using custom weights with Dice + Focal Loss:", weights)
+        # For focal loss, alpha can be a tensor of weights per class
+        alpha = torch.tensor(weights, dtype=torch.float32, device=device)
+        criterion = CombinedLoss(
+            dice_weight=0.5,
+            focal_weight=0.5,
+            alpha=alpha,
+            gamma=2.0,
+            smooth=1e-6
+        )
     else:
-        criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.2)
+        criterion = CombinedLoss(
+            dice_weight=0.5,
+            focal_weight=0.5,
+            alpha=1.0,
+            gamma=2.0,
+            smooth=1e-6
+        )
 
     # Set up optimizer
     optimizer = torch.optim.Adam(
