@@ -2277,21 +2277,9 @@ def train_segmentation_model(
     )
     model.to(device)
 
-    if weights and len(weights) == num_classes:
-        criterion = L.JointLoss(L.DiceLoss(
-            weight=torch.tensor(weights, dtype=torch.float32, device=device),
-            smooth=1e-6
-        ), L.FocalLoss(
-            weight=torch.tensor(weights, dtype=torch.float32, device=device),
-            alpha=1.0,
-            gamma=2.0,
-            smooth=1e-6
-        ))
-    else:
-        criterion = L.JointLoss(
-            L.DiceLoss(smooth=1e-6),
-            L.FocalLoss(alpha=1.0, gamma=2.0, smooth=1e-6)
-        )
+    criterion = smp.losses.FocalLoss(
+        mode="multiclass",
+    )
 
     # Set up optimizer
     optimizer = torch.optim.Adam(
