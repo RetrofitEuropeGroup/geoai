@@ -2026,20 +2026,32 @@ class FocalLoss(torch.nn.Module):
 
     def __init__(self, alpha=1.0, gamma=2.0, ignore_index=-100, reduction='mean'):
         super(FocalLoss, self).__init__()
-        self.alpha = alpha
         self.gamma = gamma
-        self.ignore_index = ignore_index  # Default to -100 instead of None
+        self.ignore_index = ignore_index
         self.reduction = reduction
 
+        # Handle alpha (class weights)
+        if isinstance(alpha, (float, int)):
+            self.alpha = alpha
+        else:
+            # Register as buffer so it moves with the model to correct device
+            self.register_buffer('alpha', torch.tensor(alpha, dtype=torch.float32))
+
     def forward(self, predictions, targets):
-        # Calculate cross entropy - ignore_index should be an integer
+        # Calculate cross entropy
         ce_loss = F.cross_entropy(predictions, targets, ignore_index=self.ignore_index, reduction='none')
 
         # Calculate p_t
         pt = torch.exp(-ce_loss)
 
-        # Calculate focal loss
-        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+        # Handle alpha weighting
+        if hasattr(self, 'alpha') and torch.is_tensor(self.alpha):
+            # Use class-specific alpha values
+            alpha_t = self.alpha.gather(0, targets.clamp(0, self.alpha.size(0) - 1))
+            focal_loss = alpha_t * (1 - pt) ** self.gamma * ce_loss
+        else:
+            # Use scalar alpha
+            focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
 
         if self.reduction == 'mean':
             return focal_loss.mean()
