@@ -2024,15 +2024,15 @@ class DiceLoss(torch.nn.Module):
 class FocalLoss(torch.nn.Module):
     """Focal Loss for addressing class imbalance."""
 
-    def __init__(self, alpha=1.0, gamma=2.0, ignore_index=None, reduction='mean'):
+    def __init__(self, alpha=1.0, gamma=2.0, ignore_index=-100, reduction='mean'):
         super(FocalLoss, self).__init__()
         self.alpha = alpha
         self.gamma = gamma
-        self.ignore_index = ignore_index
+        self.ignore_index = ignore_index  # Default to -100 instead of None
         self.reduction = reduction
 
     def forward(self, predictions, targets):
-        # Calculate cross entropy
+        # Calculate cross entropy - ignore_index should be an integer
         ce_loss = F.cross_entropy(predictions, targets, ignore_index=self.ignore_index, reduction='none')
 
         # Calculate p_t
@@ -2052,7 +2052,7 @@ class FocalLoss(torch.nn.Module):
 class CombinedLoss(torch.nn.Module):
     """Combined Dice + Focal Loss."""
 
-    def __init__(self, dice_weight=0.5, focal_weight=0.5, alpha=1.0, gamma=2.0, smooth=1e-6, ignore_index=None):
+    def __init__(self, dice_weight=0.5, focal_weight=0.5, alpha=1.0, gamma=2.0, smooth=1e-6, ignore_index=-100):
         super(CombinedLoss, self).__init__()
         self.dice_weight = dice_weight
         self.focal_weight = focal_weight
