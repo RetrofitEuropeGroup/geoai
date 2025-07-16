@@ -3457,13 +3457,7 @@ def _process_image_mask_pair(
                             )
 
                             # Remap class values if needed
-                            if class_to_id:
-                                remapped_data = np.zeros_like(label_data)
-                                for orig_val, new_val in class_to_id.items():
-                                    remapped_data[label_data == orig_val] = new_val
-                                label_mask = remapped_data
-                            else:
-                                label_mask = label_data
+                            label_mask = label_data
 
                             # Check if we have any features
                             if np.any(label_mask > 0):
