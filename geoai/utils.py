@@ -3371,14 +3371,7 @@ def _process_image_mask_pair(
                     )
 
                 # Get unique values from raster
-                sample_data = class_src.read(
-                    1,
-                    out_shape=(
-                        1,
-                        min(class_src.height, 1000),
-                        min(class_src.width, 1000),
-                    ),
-                )
+                sample_data = class_src.read(1)
 
                 unique_classes = np.unique(sample_data)
                 unique_classes = unique_classes[
@@ -3386,7 +3379,7 @@ def _process_image_mask_pair(
                 ]  # Remove 0 as it's typically background
 
                 # Create class mapping
-                class_to_id = None
+                class_to_id = {}
         else:
             # Load vector class data
             try:
