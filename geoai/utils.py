@@ -3460,7 +3460,7 @@ def _process_image_mask_pair(
                                 1,
                                 window=window_class,
                                 boundless=True,
-                                out_shape=(tile_size, tile_size)
+                                out_shape=(tile_size, tile_size),
                             )
 
                             # Remap class values if needed
@@ -3475,28 +3475,6 @@ def _process_image_mask_pair(
                             # Check if we have any features
                             if np.any(label_mask > 0):
                                 has_features = True
-
-                                # if a tile is only of class 0 and 1, print debug info.
-                                if len(np.unique(label_mask)) == 2:
-                                    #define fixed colormap
-                                    from matplotlib.colors import ListedColormap
-                                    fixed_cmap = plt.cm.get_cmap('tab20', len(np.unique(label_mask)))
-                                    unique_classes = np.unique(label_mask)
-                                    print("unique classes before: ", unique_classes)
-                                    unique_classes = np.unique(label_mask.astype(np.uint8))
-                                    print("unique classes after: ", unique_classes)
-
-                                    print(f"Debug: Tile {tile_index} only contains 2 classes")
-
-                                    #plot label_data and label_mask
-                                    plt.imshow(label_data, cmap=fixed_cmap)
-                                    plt.title(f"Label Data for Tile {tile_index}")
-                                    plt.show()
-
-                                    plt.imshow(label_mask, cmap=fixed_cmap)
-                                    plt.title(f"Label Mask for Tile {tile_index}")
-                                    plt.show()
-
                         except Exception as e:
                             if not quiet:
                                 print(f"Error reading class raster window: {e}")
@@ -3589,9 +3567,7 @@ def _process_image_mask_pair(
                 label_path = os.path.join(output_masks_dir, f"{tile_name}.tif")
                 try:
                     with rasterio.open(label_path, "w", **label_profile) as dst:
-                        label_mask = label_mask.astype(np.uint8)
-                        print(f"Unique values in label_mask: {np.unique(label_mask)}")
-                        dst.write(label_mask, 1)
+                        dst.write(label_mask.astype(np.uint8), 1)
 
                     if has_features:
                         stats["tiles_with_features"] += 1
