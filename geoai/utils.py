@@ -3474,18 +3474,26 @@ def _process_image_mask_pair(
 
                             # if a tile is only of class 0 and 1, print debug info.
                             if np.all(np.isin(label_mask, [0, 1])):
+                                from matplotlib.colors import ListedColormap
+                                # Generate distinct colors for all classes
+                                distinct_colors = plt.cm.get_cmap('tab20', unique_classes)
+                                fixed_cmap = ListedColormap([distinct_colors(i) for i in range(unique_classes)])
+
                                 print(f"Debug: Tile {tile_index} only contains class 0 and 1")
                                 print("unique classes:", unique_classes)
 
 
                                 #plot label_data and label_mask
-                                plt.imshow(label_data, cmap='Pastel1')
+                                plt.imshow(label_data, cmap=fixed_cmap)
                                 plt.title(f"Label Data for Tile {tile_index}")
                                 plt.show()
 
-                                plt.imshow(label_mask, cmap='Pastel1')
+                                plt.imshow(label_mask, cmap=fixed_cmap)
                                 plt.title(f"Label Mask for Tile {tile_index}")
                                 plt.show()
+
+                                # stop script
+                                import sys
                                 sys.exit(0)
 
                             # Check if we have any features
