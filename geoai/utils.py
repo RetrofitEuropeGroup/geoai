@@ -3452,7 +3452,7 @@ def _process_image_mask_pair(
                             label_data = class_src.read(
                                 1,
                                 window=window_class,
-                                boundless=True,
+                                boundless=False,
                                 out_shape=(tile_size, tile_size),
                             )
 
