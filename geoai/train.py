@@ -1787,6 +1787,8 @@ class SemanticSegmentationDataset(Dataset):
                 # For multi-class, we could implement more sophisticated mapping
                 # For now, just ensure values are in valid range
                 label_mask = np.clip(label_mask, 0, self.num_classes - 1)
+        elif len(unique_vals) == 2 and self.num_classes != 2:
+            label_mask = np.clip(label_mask, 0, self.num_classes - 1)
         elif len(unique_vals) == 2 and unique_vals.max() > 1:
             # Binary mask with values not in [0,1] range - normalize to [0,1]
             label_mask = (label_mask > 0).astype(np.int64)
