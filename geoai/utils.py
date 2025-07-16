@@ -3472,8 +3472,12 @@ def _process_image_mask_pair(
                             else:
                                 label_mask = label_data
 
+                            # Check if we have any features
+                            if np.any(label_mask > 0):
+                                has_features = True
+
                             # if a tile is only of class 0 and 1, print debug info.
-                            if np.all(np.isin(label_mask, [0, 1])):
+                            if np.all(np.isin(label_mask, [0, 1])) :
                                 #define fixed colormap
                                 from matplotlib.colors import ListedColormap
                                 fixed_cmap = ListedColormap(["black", "blue"])
@@ -3491,9 +3495,6 @@ def _process_image_mask_pair(
                                 plt.title(f"Label Mask for Tile {tile_index}")
                                 plt.show()
 
-                            # Check if we have any features
-                            if np.any(label_mask > 0):
-                                has_features = True
                         except Exception as e:
                             if not quiet:
                                 print(f"Error reading class raster window: {e}")
