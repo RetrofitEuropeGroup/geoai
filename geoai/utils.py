@@ -3460,8 +3460,7 @@ def _process_image_mask_pair(
                                 1,
                                 window=window_class,
                                 boundless=True,
-                                out_shape=(tile_size, tile_size),
-                                masked=True
+                                out_shape=(tile_size, tile_size)
                             )
 
                             # Remap class values if needed
@@ -3472,6 +3471,22 @@ def _process_image_mask_pair(
                                 label_mask = remapped_data
                             else:
                                 label_mask = label_data
+
+                            # if a tile is only of class 0 and 1, print debug info.
+                            if np.all(np.isin(label_mask, [0, 1])):
+                                print(f"Debug: Tile {tile_index} only contains class 0 and 1")
+                                print("unique classes:", unique_classes)
+
+
+                                #plot label_data and label_mask
+                                plt.imshow(label_data, cmap='gray')
+                                plt.title(f"Label Data for Tile {tile_index}")
+                                plt.show()
+
+                                plt.imshow(label_mask, cmap='gray')
+                                plt.title(f"Label Mask for Tile {tile_index}")
+                                plt.show()
+                                exit()
 
                             # Check if we have any features
                             if np.any(label_mask > 0):
