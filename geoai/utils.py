@@ -3371,7 +3371,14 @@ def _process_image_mask_pair(
                     )
 
                 # Get unique values from raster
-                sample_data = class_src.read(1)
+                sample_data = class_src.read(
+                    1,
+                    out_shape=(
+                        1,
+                        min(class_src.height, 1000),
+                        min(class_src.width, 1000),
+                    ),
+                )
 
                 unique_classes = np.unique(sample_data)
                 unique_classes = unique_classes[
@@ -3379,7 +3386,7 @@ def _process_image_mask_pair(
                 ]  # Remove 0 as it's typically background
 
                 # Create class mapping
-                class_to_id = {}
+                class_to_id = {int(cls): int(cls) for i, cls in enumerate(unique_classes)}
         else:
             # Load vector class data
             try:
@@ -3452,12 +3459,18 @@ def _process_image_mask_pair(
                             label_data = class_src.read(
                                 1,
                                 window=window_class,
-                                boundless=False,
+                                boundless=True,
                                 out_shape=(tile_size, tile_size),
                             )
 
                             # Remap class values if needed
-                            label_mask = label_data
+                            if class_to_id:
+                                remapped_data = np.zeros_like(label_data)
+                                for orig_val, new_val in class_to_id.items():
+                                    remapped_data[label_data == orig_val] = new_val
+                                label_mask = remapped_data
+                            else:
+                                label_mask = label_data
 
                             # Check if we have any features
                             if np.any(label_mask > 0):
