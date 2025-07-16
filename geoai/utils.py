@@ -3491,10 +3491,6 @@ def _process_image_mask_pair(
                                 plt.title(f"Label Mask for Tile {tile_index}")
                                 plt.show()
 
-                                # stop script
-                                import sys
-                                sys.exit(0)
-
                             # Check if we have any features
                             if np.any(label_mask > 0):
                                 has_features = True
