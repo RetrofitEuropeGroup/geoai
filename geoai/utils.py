@@ -3211,7 +3211,6 @@ def export_geotiff_tiles_batch(
         tqdm(
             zip(image_files, mask_files),
             desc="Processing image pairs",
-            disable=quiet,
             total=len(image_files),
         )
     ):
