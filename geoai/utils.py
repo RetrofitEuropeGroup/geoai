@@ -3461,6 +3461,7 @@ def _process_image_mask_pair(
                                 window=window_class,
                                 boundless=True,
                                 out_shape=(tile_size, tile_size),
+                                masked=True
                             )
 
                             # Remap class values if needed
