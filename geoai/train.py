@@ -2506,7 +2506,7 @@ def train_segmentation_model(
     )
 
     # Set up optimizer
-    optimizer = torch.optim.Adam(
+    optimizer = torch.optim.AdamW(
         model.parameters(), lr=learning_rate, weight_decay=weight_decay
     )
 
@@ -2605,7 +2605,8 @@ def train_segmentation_model(
 
         # Print metrics
         print(
-            f"Epoch {epoch+1}/{num_epochs}: "
+            f"Epoch {epoch+1}/{num_epochs}:"
+            f"Learning Rate: {optimizer.param_groups[0]['lr']:.6f}, "
             f"Train Loss: {train_loss:.4f}, "
             f"Val Loss: {eval_metrics['loss']:.4f}, "
             f"Val IoU: {eval_metrics['IoU']:.4f}, "
