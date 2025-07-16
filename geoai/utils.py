@@ -3589,7 +3589,9 @@ def _process_image_mask_pair(
                 label_path = os.path.join(output_masks_dir, f"{tile_name}.tif")
                 try:
                     with rasterio.open(label_path, "w", **label_profile) as dst:
-                        dst.write(label_mask.astype(np.uint8), 1)
+                        label_mask = label_mask.astype(np.uint8)
+                        print(f"Unique values in label_mask: {np.unique(label_mask)}")
+                        dst.write(label_mask, 1)
 
                     if has_features:
                         stats["tiles_with_features"] += 1
