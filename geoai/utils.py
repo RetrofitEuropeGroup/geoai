@@ -3479,7 +3479,7 @@ def _process_image_mask_pair(
 
 
                                 #plot label_data and label_mask
-                                plt.imshow(label_data, cmap='pastel1
+                                plt.imshow(label_data, cmap='pastel1')
                                 plt.title(f"Label Data for Tile {tile_index}")
                                 plt.show()
 
