@@ -3479,14 +3479,14 @@ def _process_image_mask_pair(
 
 
                                 #plot label_data and label_mask
-                                plt.imshow(label_data, cmap='gray')
+                                plt.imshow(label_data, cmap='pastel1
                                 plt.title(f"Label Data for Tile {tile_index}")
                                 plt.show()
 
-                                plt.imshow(label_mask, cmap='gray')
+                                plt.imshow(label_mask, cmap='pastel1')
                                 plt.title(f"Label Mask for Tile {tile_index}")
                                 plt.show()
-                                exit()
+                                raise ValueError()
 
                             # Check if we have any features
                             if np.any(label_mask > 0):
