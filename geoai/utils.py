@@ -3482,9 +3482,11 @@ def _process_image_mask_pair(
                                     from matplotlib.colors import ListedColormap
                                     fixed_cmap = plt.cm.get_cmap('tab20', len(np.unique(label_mask)))
                                     unique_classes = np.unique(label_mask)
+                                    print("unique classes before: ", unique_classes)
+                                    unique_classes = np.unique(label_mask.astype(np.uint8))
+                                    print("unique classes after: ", unique_classes)
 
-                                    print(f"Debug: Tile {tile_index} only contains class 0 and 1")
-                                    print("unique classes:", unique_classes)
+                                    print(f"Debug: Tile {tile_index} only contains 2 classes")
 
                                     #plot label_data and label_mask
                                     plt.imshow(label_data, cmap=fixed_cmap)
