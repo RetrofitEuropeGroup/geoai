@@ -2502,6 +2502,8 @@ def train_segmentation_model(
         **kwargs,
     )
 
+    model.to(device)
+
     criterion = smp.losses.FocalLoss(
         gamma=3.0,
         mode="multiclass",
@@ -2570,13 +2572,22 @@ def train_segmentation_model(
 
             # check if can load from hugging face
             else:
+                del model
+                torch.cuda.empty_cache()
                 model = smp.from_pretrained(checkpoint_path, classes=num_classes, in_channels=num_channels, strict=False)
+                model.to(device)
+                # Set up optimizer
+                optimizer = torch.optim.AdamW(
+                    model.parameters(), lr=learning_rate, weight_decay=weight_decay
+                )
+                # Set up learning rate scheduler
+                lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                    optimizer, mode="min", factor=0.5, patience=5
+                )
                 print("Loaded model weights from Hugging Face model hub")
 
         except Exception as e:
             raise RuntimeError(f"Failed to load checkpoint: {str(e)}")
-
-    model.to(device)
 
     print(f"Starting training with {architecture} + {encoder_name}")
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
