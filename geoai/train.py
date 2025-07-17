@@ -2527,9 +2527,6 @@ def train_segmentation_model(
 
     # Load checkpoint if provided
     if checkpoint_path is not None:
-        if not os.path.exists(checkpoint_path):
-            raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
-
         print(f"Loading checkpoint from: {checkpoint_path}")
         try:
             if os.path.exists(checkpoint_path):
