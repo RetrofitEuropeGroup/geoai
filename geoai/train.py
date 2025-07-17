@@ -2501,7 +2501,6 @@ def train_segmentation_model(
         activation=None,  # We'll apply softmax later
         **kwargs,
     )
-    model.to(device)
 
     criterion = smp.losses.FocalLoss(
         gamma=3.0,
@@ -2533,46 +2532,54 @@ def train_segmentation_model(
 
         print(f"Loading checkpoint from: {checkpoint_path}")
         try:
-            checkpoint = torch.load(checkpoint_path, map_location=device)
+            if os.path.exists(checkpoint_path):
+                checkpoint = torch.load(checkpoint_path, map_location=device)
 
-            if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
-                # Load model state
-                model.load_state_dict(checkpoint["model_state_dict"])
+                if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+                    # Load model state
+                    model.load_state_dict(checkpoint["model_state_dict"])
 
-                if resume_training:
-                    # Resume training from checkpoint
-                    start_epoch = checkpoint.get("epoch", 0) + 1
-                    best_iou = checkpoint.get("best_iou", 0)
+                    if resume_training:
+                        # Resume training from checkpoint
+                        start_epoch = checkpoint.get("epoch", 0) + 1
+                        best_iou = checkpoint.get("best_iou", 0)
 
-                    # Load optimizer state if available
-                    if "optimizer_state_dict" in checkpoint:
-                        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+                        # Load optimizer state if available
+                        if "optimizer_state_dict" in checkpoint:
+                            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
-                    # Load scheduler state if available
-                    if "scheduler_state_dict" in checkpoint:
-                        lr_scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+                        # Load scheduler state if available
+                        if "scheduler_state_dict" in checkpoint:
+                            lr_scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 
-                    # Load training history if available
-                    if "train_losses" in checkpoint:
-                        train_losses = checkpoint["train_losses"]
-                    if "val_losses" in checkpoint:
-                        val_losses = checkpoint["val_losses"]
-                    if "val_ious" in checkpoint:
-                        val_ious = checkpoint["val_ious"]
-                    if "val_dices" in checkpoint:
-                        val_dices = checkpoint["val_dices"]
+                        # Load training history if available
+                        if "train_losses" in checkpoint:
+                            train_losses = checkpoint["train_losses"]
+                        if "val_losses" in checkpoint:
+                            val_losses = checkpoint["val_losses"]
+                        if "val_ious" in checkpoint:
+                            val_ious = checkpoint["val_ious"]
+                        if "val_dices" in checkpoint:
+                            val_dices = checkpoint["val_dices"]
 
-                    print(f"Resuming training from epoch {start_epoch}")
-                    print(f"Previous best IoU: {best_iou:.4f}")
+                        print(f"Resuming training from epoch {start_epoch}")
+                        print(f"Previous best IoU: {best_iou:.4f}")
+                    else:
+                        print("Loaded model weights only (not resuming training state)")
                 else:
-                    print("Loaded model weights only (not resuming training state)")
+                    # Assume it's just model weights
+                    model.load_state_dict(checkpoint)
+                    print("Loaded model weights only")
+
+            # check if can load from hugging face
             else:
-                # Assume it's just model weights
-                model.load_state_dict(checkpoint)
-                print("Loaded model weights only")
+                model = smp.from_pretrained(checkpoint_path, classes=num_classes, in_channels=num_channels, strict=False)
+                print("Loaded model weights from Hugging Face model hub")
 
         except Exception as e:
             raise RuntimeError(f"Failed to load checkpoint: {str(e)}")
+
+    model.to(device)
 
     print(f"Starting training with {architecture} + {encoder_name}")
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
