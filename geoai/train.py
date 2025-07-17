@@ -2504,6 +2504,7 @@ def train_segmentation_model(
     model.to(device)
 
     criterion = smp.losses.FocalLoss(
+        gamma=3.0,
         mode="multiclass",
     )
 
