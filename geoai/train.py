@@ -2226,6 +2226,7 @@ def train_segmentation_model(
     num_epochs=50,
     use_mixed_precision=True,
     learning_rate=4e-5,
+    weights: Optional[list] = None,
     weight_decay=1e-4,
     seed=42,
     val_split=0.2,
@@ -2503,10 +2504,18 @@ def train_segmentation_model(
 
     model.to(device)
 
-    criterion = smp.losses.FocalLoss(
-        gamma=3.0,
-        mode="multiclass",
-    )
+    if weights is not None:
+        if len(weights) != num_classes:
+            raise ValueError(f"Length of weights list ({len(weights)}) must match num_classes ({num_classes})")
+        class_weights = torch.tensor(weights, dtype=torch.float).to(device)
+        criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+        print(f"Using weighted CrossEntropyLoss with weights: {weights}")
+    else:
+        criterion = smp.losses.FocalLoss(
+            gamma=3.0,
+            mode="multiclass",
+        )
+        print("Using FocalLoss")
 
     # Set up optimizer
     optimizer = torch.optim.AdamW(
