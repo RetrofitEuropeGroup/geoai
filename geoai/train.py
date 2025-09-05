@@ -2601,7 +2601,7 @@ def train_segmentation_model(
         print(f"Using weighted CrossEntropyLoss with weights: {weights}")
     else:
         criterion = smp.losses.FocalLoss(
-            gamma=3.0,
+            gamma=2.0,
             mode="multiclass",
         )
         print("Using FocalLoss")
