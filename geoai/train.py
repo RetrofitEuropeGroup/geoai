@@ -2246,8 +2246,6 @@ def train_semantic_one_epoch(
     avg_loss = total_loss / num_batches
     return avg_loss
 
-def evaluate_semantic(model, data_loader, device, criterion, num_classes=2):
-
 def evaluate_semantic(
     model: torch.nn.Module,
     data_loader: DataLoader,
