@@ -1907,10 +1907,10 @@ def get_semantic_transform(train):
     if train:
         transforms.append(SemanticRandomTransform())
         transforms.append(SemanticColorJitter(
-            brightness=0.2,
-            contrast=0.2,
-            saturation=0.2,
-            hue=0.1
+            brightness=0.3,
+            contrast=0.3,
+            saturation=0.3,
+            hue=0.2
         ))
 
     return SemanticTransforms(transforms)
@@ -2224,7 +2224,6 @@ def train_segmentation_model(
     num_classes=2,
     batch_size=8,
     num_epochs=50,
-    weights=None,
     use_mixed_precision=True,
     learning_rate=4e-5,
     weight_decay=1e-4,
@@ -2516,7 +2515,7 @@ def train_segmentation_model(
 
     # Set up learning rate scheduler
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=5
+        optimizer, mode="min", factor=0.5, patience=2
     )
 
     # Initialize tracking variables
@@ -2636,6 +2635,12 @@ def train_segmentation_model(
             best_iou = eval_metrics["IoU"]
             print(f"Saving best model with IoU: {best_iou:.4f}")
             torch.save(model.state_dict(), os.path.join(output_dir, "best_model.pth"))
+
+        # if no improvement for 5, stop training early
+        if len(val_ious) > 5 and all(x <= best_iou for x
+                            in val_ious[-5:]):
+            print("No improvement in IoU for 5 epochs, stopping training early.")
+            break
 
         # Save checkpoint every 10 epochs (if not save_best_only)
         if not save_best_only and ((epoch + 1) % 10 == 0 or epoch == num_epochs - 1):
