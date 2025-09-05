@@ -2611,9 +2611,6 @@ def train_segmentation_model(
         print(f"Using {torch.cuda.device_count()} GPUs for training")
         model = torch.nn.DataParallel(model)
 
-    # Set up loss function (CrossEntropyLoss for multi-class, can also use DiceLoss)
-    criterion = torch.nn.CrossEntropyLoss()
-
     # Set up optimizer
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=learning_rate, weight_decay=weight_decay
