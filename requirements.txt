@@ -1,6 +1,8 @@
 albumentations
 buildingregulariser
 contextily
+datasets>=3.0
+ever-beta
 geopandas
 huggingface_hub
 jupyter-server-proxy
@@ -11,6 +13,7 @@ maplibre
 opencv-python-headless
 overturemaps
 planetary-computer
+pyarrow
 pystac-client
 rasterio
 rioxarray
@@ -18,6 +21,7 @@ scikit-image
 scikit-learn
 # segment-geospatial
 torch
+torchange
 torchgeo
 torchinfo
 tqdm
