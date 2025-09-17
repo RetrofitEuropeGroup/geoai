@@ -2739,12 +2739,6 @@ def train_segmentation_model(
             print(f"Saving best model with IoU: {best_iou:.4f}")
             torch.save(model.state_dict(), os.path.join(output_dir, "best_model.pth"))
 
-        # if no improvement for 5, stop training early
-        if len(val_ious) > 5 and all(x <= best_iou for x
-                            in val_ious[-5:]):
-            print("No improvement in IoU for 5 epochs, stopping training early.")
-            break
-
         # Save checkpoint every 10 epochs (if not save_best_only)
         if not save_best_only and ((epoch + 1) % 10 == 0 or epoch == num_epochs - 1):
             torch.save(
